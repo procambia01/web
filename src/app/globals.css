@@ -1,7 +1,12 @@
-@import "tailwindcss";
-
 /* ── Google Fonts ─────────────────────────────────────────── */
+/* Must come before @import "tailwindcss" — Tailwind v4's import
+   expands into generated content during build, so any @import after
+   it violates CSS's "imports must precede all other rules" requirement
+   at the compiled-output level, even though this file's source order
+   looks fine before processing. */
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+@import "tailwindcss";
 
 /* ── Design tokens ───────────────────────────────────────── */
 @theme {
