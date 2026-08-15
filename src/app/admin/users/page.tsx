@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { Search, Shield, Ban, CheckCircle, Eye, MoreHorizontal } from 'lucide-react'
@@ -15,7 +16,7 @@ import { formatNumber, formatRelative, formatRating, trustScoreLabel, trustScore
 import { cn } from '@/lib/utils'
 import type { User } from '@/types'
 
-export default function AdminUsersPage() {
+function AdminUsersPageContent() {
   const [search, setSearch]   = useQueryState('q', { defaultValue: '' })
   const [role, setRole]       = useQueryState('role', { defaultValue: '' })
   const [verified, setVerified] = useQueryState('verified', { defaultValue: '' })
@@ -191,5 +192,19 @@ export default function AdminUsersPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function AdminUsersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <AdminUsersPageContent />
+    </Suspense>
   )
 }

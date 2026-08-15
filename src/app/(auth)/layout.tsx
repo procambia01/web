@@ -29,7 +29,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             <div className="w-10 h-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center border border-white/20">
               <span className="font-display font-black text-white text-lg">S</span>
             </div>
-            <span className="font-display font-bold text-white text-xl">SwapFX</span>
+            <span className="font-display font-bold text-white text-xl">Cashmova</span>
           </div>
         </div>
 
@@ -67,7 +67,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         {/* Testimonial — international user */}
         <div className="relative z-10 bg-white/5 backdrop-blur rounded-2xl p-5 border border-white/10">
           <p className="text-blue-100/80 text-sm font-body leading-relaxed italic">
-            "I saved over €300 exchanging GBP to EUR before my Paris move. Found a match in London within the hour. SwapFX is brilliant."
+            "I saved over €300 exchanging GBP to EUR before my Paris move. Found a match in London within the hour. Cashmova is brilliant."
           </p>
           <div className="flex items-center gap-3 mt-4">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1A6BFF] to-[#00C896] flex items-center justify-center text-white text-xs font-bold">
@@ -88,7 +88,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <div className="w-9 h-9 rounded-xl bg-[var(--color-primary)] flex items-center justify-center">
             <span className="font-display font-black text-white">S</span>
           </div>
-          <span className="font-display font-bold text-[var(--color-text-primary)] text-xl">SwapFX</span>
+          <span className="font-display font-bold text-[var(--color-text-primary)] text-xl">Cashmova</span>
         </div>
         <div className="w-full max-w-md">{children}</div>
       </div>

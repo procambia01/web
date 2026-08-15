@@ -15,7 +15,6 @@ import { changePasswordSchema } from '@/lib/validators'
 import type { z } from 'zod'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
-import type { z } from 'zod'
 
 type ChangePasswordForm = z.infer<typeof changePasswordSchema>
 
@@ -115,7 +114,7 @@ export default function SettingsPage() {
   const handleDeleteAccount = async () => {
     const confirmed = prompt('Type DELETE to confirm account deletion:')
     if (confirmed !== 'DELETE') return
-    toast.error('Account deletion — contact support at support@swapfx.app')
+    toast.error('Account deletion — contact support at support@cashmova.com')
   }
 
   const THEMES = [
@@ -206,7 +205,7 @@ export default function SettingsPage() {
         <div className="rounded-xl border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-800 font-body">Delete Account</p>
           <p className="text-xs text-red-600 font-body mt-1 mb-3 leading-relaxed">
-            Permanently delete your SwapFX account and all associated data. This action cannot be undone.
+            Permanently delete your Cashmova account and all associated data. This action cannot be undone.
           </p>
           <button onClick={handleDeleteAccount}
             className="h-8 px-4 rounded-lg bg-red-600 text-white text-xs font-semibold font-body hover:bg-red-700 transition-colors">

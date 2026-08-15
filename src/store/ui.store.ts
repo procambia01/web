@@ -17,6 +17,6 @@ export const useUIStore = create<UIState>()(
       toggleSidebar:    () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setMobileMenu:    (open) => set({ mobileMenuOpen: open }),
     }),
-    { name: 'swapfx-ui', partialize: s => ({ sidebarCollapsed: s.sidebarCollapsed }) }
+    { name: 'cashmova-ui', partialize: s => ({ sidebarCollapsed: s.sidebarCollapsed }) }
   )
 )

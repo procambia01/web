@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useQueryState } from 'nuqs'
@@ -38,7 +39,7 @@ const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'error' | 'neutral'
 
 const CREDIT_TYPES = new Set(['REFERRAL_BONUS', 'SECURITY_DEPOSIT_REFUND'])
 
-export default function TransactionsPage() {
+function TransactionsPageContent() {
   const [status, setStatus] = useQueryState('status', { defaultValue: '' })
   const [page, setPage]     = useState(1)
 
@@ -156,5 +157,19 @@ export default function TransactionsPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function TransactionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <TransactionsPageContent />
+    </Suspense>
   )
 }

@@ -85,3 +85,16 @@ export const apiDelete = <T>(url: string, cfg?: AxiosRequestConfig) =>
 
 export const apiPaginated = <T>(url: string, cfg?: AxiosRequestConfig) =>
   api.get<PaginatedResponse<T>>(url, cfg).then(r => r.data)
+
+// Multipart uploads (profile images, ID documents, selfies) — goes through
+// the same authenticated axios instance as everything else, so the
+// baseURL and Bearer token are actually attached. A raw fetch() to a
+// relative path silently hits the Next.js app's own origin instead of
+// the API, with no auth header at all.
+export const apiUpload = <T>(url: string, formData: FormData, cfg?: AxiosRequestConfig) =>
+  api
+    .post<ApiResponse<T>>(url, formData, {
+      ...cfg,
+      headers: { ...cfg?.headers, 'Content-Type': 'multipart/form-data' },
+    })
+    .then(r => r.data)

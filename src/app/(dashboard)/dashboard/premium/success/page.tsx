@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
@@ -13,7 +13,7 @@ const PLAN_NAMES: Record<string, string> = {
   BUSINESS_YEARLY:  'Business Annual',
 }
 
-export default function PremiumSuccessPage() {
+function PremiumSuccessContent() {
   const params  = useSearchParams()
   const qc      = useQueryClient()
   const planId  = params.get('plan') ?? ''
@@ -105,5 +105,19 @@ export default function PremiumSuccessPage() {
         </motion.div>
       </motion.div>
     </div>
+  )
+}
+
+export default function PremiumSuccessPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[70vh] flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <PremiumSuccessContent />
+    </Suspense>
   )
 }

@@ -25,7 +25,7 @@ function usePageTitle(): string {
   if (p.startsWith('/admin/verifications')) return 'Verifications'
   if (p.startsWith('/admin/analytics'))  return 'Analytics'
   if (p.startsWith('/admin'))            return 'Admin Overview'
-  return 'SwapFX'
+  return 'Cashmova'
 }
 
 export function Topbar() {

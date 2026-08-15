@@ -38,7 +38,7 @@ export default function LoginPage() {
           Welcome back
         </h2>
         <p className="mt-2 text-[var(--color-text-secondary)] font-body">
-          Sign in to your SwapFX account
+          Sign in to your Cashmova account
         </p>
       </div>
 

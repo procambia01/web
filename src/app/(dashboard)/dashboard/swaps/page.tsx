@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { Search, ArrowRight, MessageSquare } from 'lucide-react'
@@ -24,7 +25,7 @@ const TABS = [
 
 const ACTIVE = ['PENDING', 'AGREED', 'IN_PROGRESS', 'CONFIRMING']
 
-export default function SwapsPage() {
+function SwapsPageContent() {
   const { user }              = useAuthStore()
   const [tab, setTab]         = useQueryState('tab', { defaultValue: 'all' })
   const [search, setSearch]   = useState('')
@@ -184,5 +185,19 @@ export default function SwapsPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function SwapsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <SwapsPageContent />
+    </Suspense>
   )
 }

@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { Search, Eye, CheckCircle } from 'lucide-react'
@@ -23,7 +24,7 @@ const STATUS_VARIANT: Record<string, 'warning' | 'info' | 'success' | 'neutral' 
   CLOSED: 'neutral', ESCALATED: 'error',
 }
 
-export default function AdminDisputesPage() {
+function AdminDisputesPageContent() {
   const [status, setStatus]   = useQueryState('status', { defaultValue: '' })
   const [priority, setPriority] = useQueryState('priority', { defaultValue: '' })
   const [page, setPage]       = useState(1)
@@ -149,5 +150,19 @@ export default function AdminDisputesPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function AdminDisputesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <AdminDisputesPageContent />
+    </Suspense>
   )
 }

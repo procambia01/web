@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ArrowLeftRight, FileText, MessageSquare,
   Bell, User, Settings, LogOut, ChevronLeft, ChevronRight,
   ShieldCheck, Receipt, Gift, Users, BarChart3, AlertTriangle,
-  X, Sparkles,
+  X, Sparkles, Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'
@@ -23,6 +23,7 @@ const USER_NAV = [
   { href: '/dashboard/notifications', icon: Bell,            label: 'Notifications'},
   { href: '/dashboard/transactions',  icon: Receipt,         label: 'Transactions' },
   { href: '/dashboard/referrals',     icon: Gift,            label: 'Referrals'    },
+  { href: '/dashboard/partner',       icon: Building2,       label: 'Partner API'  },
 ] as const
 
 const ADMIN_NAV = [
@@ -69,7 +70,7 @@ export function Sidebar({ mobile }: SidebarProps) {
             <div className="w-8 h-8 rounded-lg bg-[var(--color-primary)] flex items-center justify-center shrink-0">
               <span className="font-display font-black text-white text-sm">S</span>
             </div>
-            <span className="font-display font-bold text-white text-lg">SwapFX</span>
+            <span className="font-display font-bold text-white text-lg">Cashmova</span>
           </Link>
         )}
         {collapsed && (

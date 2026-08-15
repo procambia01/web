@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { CheckCircle, XCircle, Eye } from 'lucide-react'
@@ -14,7 +15,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { formatRelative } from '@/lib/format'
 import type { User } from '@/types'
 
-export default function AdminVerificationsPage() {
+function AdminVerificationsPageContent() {
   const [status, setStatus] = useQueryState('status', { defaultValue: 'PENDING' })
   const [page, setPage]     = useState(1)
 
@@ -150,5 +151,19 @@ export default function AdminVerificationsPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function AdminVerificationsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <AdminVerificationsPageContent />
+    </Suspense>
   )
 }

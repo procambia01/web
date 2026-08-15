@@ -326,7 +326,7 @@ export default function PremiumPage() {
 
       {/* Security note */}
       <p className="text-center text-xs text-[var(--color-text-muted)] font-body">
-        🔒 Payments securely processed by Stripe · No card stored on SwapFX servers · Cancel anytime
+        🔒 Payments securely processed by Stripe · No card stored on Cashmova servers · Cancel anytime
       </p>
     </motion.div>
   )

@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { useState } from 'react'
-import { swapService } from '@/services'
+import { swapService, feeService } from '@/services'
 import { SwapStatusBadge } from '@/components/ui/status-badge'
 import { UserAvatar } from '@/components/ui/user-avatar'
 import { useAuthStore } from '@/store/auth.store'
@@ -165,6 +165,27 @@ export default function SwapDetailPage() {
   })
 
   const swap = data?.data
+
+  const { data: feeData } = useQuery({
+    queryKey: ['swap-fee', id],
+    queryFn:  () => feeService.getStatus(id),
+    enabled:  swap?.status === 'COMPLETED',
+  })
+  const fee = feeData?.data
+  const [isPayingFee, setIsPayingFee] = useState(false)
+
+  const handlePayFee = async () => {
+    setIsPayingFee(true)
+    try {
+      const res = await feeService.createCheckout(id)
+      if (res.data.url) window.location.href = res.data.url
+    } catch {
+      toast.error('Could not start checkout')
+    } finally {
+      setIsPayingFee(false)
+    }
+  }
+
   if (isLoading || !swap) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
@@ -225,6 +246,33 @@ export default function SwapDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Platform fee */}
+        {fee && fee.amount !== null && (
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] flex items-center justify-between">
+            <div>
+              <p className="font-display font-bold text-sm text-[var(--color-text-primary)]">Platform fee</p>
+              <p className="text-xs text-[var(--color-text-secondary)] font-body mt-0.5">
+                {fee.waived
+                  ? 'Waived — Premium member or referral bonus'
+                  : fee.paid
+                  ? 'Paid, thanks!'
+                  : `${fee.currency} ${fee.amount.toFixed(2)} due`}
+              </p>
+            </div>
+            {fee.waived || fee.paid ? (
+              <CheckCircle2 size={22} className="text-[var(--color-success,#10B981)]" />
+            ) : (
+              <button
+                onClick={handlePayFee}
+                disabled={isPayingFee}
+                className="h-9 px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors disabled:opacity-60"
+              >
+                {isPayingFee ? 'Loading…' : 'Pay'}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Left: exchange + partner */}

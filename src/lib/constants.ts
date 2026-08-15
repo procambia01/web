@@ -1,10 +1,10 @@
-export const APP_NAME = 'SwapFX'
+export const APP_NAME = 'Cashmova'
 export const APP_URL  = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
 export const API_URL  = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1'
 export const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:3000'
 
-export const COOKIE_ACCESS_TOKEN  = 'swapfx_access'
-export const COOKIE_REFRESH_TOKEN = 'swapfx_refresh'
+export const COOKIE_ACCESS_TOKEN  = 'cashmova_access'
+export const COOKIE_REFRESH_TOKEN = 'cashmova_refresh'
 
 export const CURRENCIES = [
   { code: 'USD', name: 'US Dollar',           symbol: '$',    flag: '🇺🇸' },

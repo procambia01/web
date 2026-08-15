@@ -75,7 +75,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       clearError: ()  => set({ error: null }),
     }),
     {
-      name: 'swapfx-auth',
+      name: 'cashmova-auth',
       partialize: (s) => ({ user: s.user, isAuthenticated: s.isAuthenticated }),
     }
   )

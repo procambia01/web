@@ -6,7 +6,7 @@ import { MessageSquare, ArrowRight } from 'lucide-react'
 import { messageService } from '@/services'
 import { UserAvatar } from '@/components/ui/user-avatar'
 import { PageHeader } from '@/components/ui/page-header'
-import { formatMessageTime, formatCurrency } from '@/lib/format'
+import { formatCurrency } from '@/lib/format'
 import { useAuthStore } from '@/store/auth.store'
 import { cn } from '@/lib/utils'
 

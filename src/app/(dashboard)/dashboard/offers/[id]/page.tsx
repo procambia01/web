@@ -9,7 +9,8 @@ import {
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import toast from 'react-hot-toast'
-import { offerService } from '@/services'
+import { useState } from 'react'
+import { offerService, swapService, boostService } from '@/services'
 import { OfferStatusBadge } from '@/components/ui/status-badge'
 import { UserAvatar } from '@/components/ui/user-avatar'
 import {
@@ -39,6 +40,8 @@ export default function OfferDetailPage() {
   const router   = useRouter()
   const qc       = useQueryClient()
   const { user } = useAuthStore()
+  const [isInitiatingSwap, setIsInitiatingSwap] = useState(false)
+  const [isBoosting, setIsBoosting] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['offer', id],
@@ -53,6 +56,42 @@ export default function OfferDetailPage() {
   )
 
   const isOwner = offer.userId === user?.id
+  const isPremium = Boolean(user?.isPremium) && (!user?.premiumExpiry || new Date(user.premiumExpiry) > new Date())
+  const isBoostActive = Boolean(offer.boostedUntil && new Date(offer.boostedUntil) > new Date())
+
+  const handleBoost = async (hours: number, optionIndex: number) => {
+    if (isBoosting) return
+    setIsBoosting(true)
+    try {
+      if (isPremium) {
+        await boostService.boostFree(offer.id, hours)
+        toast.success('Offer boosted!')
+        qc.invalidateQueries({ queryKey: ['offer', id] })
+      } else {
+        const res = await boostService.createCheckout(offer.id, optionIndex)
+        if (res.data.url) window.location.href = res.data.url
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Could not boost this offer.')
+    } finally {
+      setIsBoosting(false)
+    }
+  }
+
+  const handleInitiateSwap = async () => {
+    if (isInitiatingSwap) return
+    setIsInitiatingSwap(true)
+    try {
+      const res = await swapService.initiateSwap(offer.id)
+      toast.success('Swap request sent!')
+      router.push(`/dashboard/swaps/${res.data.id}`)
+    } catch (err: any) {
+      const message = err?.response?.data?.message ?? 'Could not start this swap. Please try again.'
+      toast.error(message)
+    } finally {
+      setIsInitiatingSwap(false)
+    }
+  }
 
   const handleDelete = async () => {
     if (!confirm('Delete this offer? This cannot be undone.')) return
@@ -196,6 +235,39 @@ export default function OfferDetailPage() {
 
         {/* Right: trader info */}
         <div className="space-y-5">
+          {isOwner && (
+            <Card title="Boost this offer">
+              <p className="text-xs text-[var(--color-text-secondary)] font-body mb-3">
+                {isBoostActive
+                  ? `Boosted until ${formatDateTime(offer.boostedUntil!)}`
+                  : isPremium
+                  ? 'Feature this offer at the top of search results — free with Premium.'
+                  : 'Feature this offer at the top of search results.'}
+              </p>
+              {!isBoostActive && (
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { hours: 24, optionIndex: 0, label: '24h', price: '$1.99' },
+                    { hours: 72, optionIndex: 1, label: '3d', price: '$4.99' },
+                    { hours: 168, optionIndex: 2, label: '7d', price: '$9.99' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.hours}
+                      disabled={isBoosting}
+                      onClick={() => handleBoost(opt.hours, opt.optionIndex)}
+                      className="flex flex-col items-center py-2.5 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <span className="text-sm font-semibold text-[var(--color-text-primary)] font-body">{opt.label}</span>
+                      <span className="text-[10px] text-[var(--color-text-muted)] font-body">
+                        {isPremium ? 'Free' : opt.price}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
+
           <Card title="Trader">
             <div className="flex flex-col items-center text-center gap-3">
               <UserAvatar name={offer.user.name} image={offer.user.image} size="xl" verified={offer.user.idVerified} />
@@ -229,11 +301,18 @@ export default function OfferDetailPage() {
           {/* Initiate swap CTA */}
           {!isOwner && offer.status === 'ACTIVE' && (
             <button
-              onClick={() => toast.info('Connect to backend to initiate swap')}
-              className="w-full h-11 rounded-xl bg-[var(--color-primary)] text-white font-semibold font-body text-sm hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] flex items-center justify-center gap-2"
+              onClick={handleInitiateSwap}
+              disabled={isInitiatingSwap}
+              className="w-full h-11 rounded-xl bg-[var(--color-primary)] text-white font-semibold font-body text-sm hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <ArrowLeftRight size={16} />
-              Swap with {offer.user.name.split(' ')[0]}
+              {isInitiatingSwap ? (
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  <ArrowLeftRight size={16} />
+                  Swap with {offer.user.name.split(' ')[0]}
+                </>
+              )}
             </button>
           )}
         </div>

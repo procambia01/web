@@ -1,4 +1,5 @@
 'use client'
+import { Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { Plus, Search, Filter, Eye, Pencil, Trash2, Pause, Play, ArrowRight } from 'lucide-react'
@@ -17,7 +18,7 @@ import type { SwapOffer } from '@/types'
 const TABS = ['all', 'active', 'matched', 'completed', 'paused', 'expired'] as const
 type Tab = typeof TABS[number]
 
-export default function OffersPage() {
+function OffersPageContent() {
   const [tab, setTab]         = useQueryState('tab', { defaultValue: 'all' })
   const [search, setSearch]   = useState('')
   const [page, setPage]       = useState(1)
@@ -235,5 +236,19 @@ export default function OffersPage() {
         onPageChange={setPage}
       />
     </motion.div>
+  )
+}
+
+export default function OffersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <div className="w-8 h-8 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <OffersPageContent />
+    </Suspense>
   )
 }

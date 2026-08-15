@@ -81,7 +81,7 @@ const FAQS = [
   },
   {
     q: "Which currencies are supported?",
-    a: "SwapFX supports 120+ currencies across Europe, North America, the Middle East, and beyond. EUR, GBP, USD, CHF, CAD, AUD, SEK, NOK, DKK and many more.",
+    a: "Cashmova supports 120+ currencies across Europe, North America, the Middle East, and beyond. EUR, GBP, USD, CHF, CAD, AUD, SEK, NOK, DKK and many more.",
   },
   {
     q: "How does pricing compare to banks?",
@@ -92,8 +92,8 @@ const FAQS = [
     a: "Yes, anytime from your billing dashboard. You keep access until the end of your paid period. No cancellation fees.",
   },
   {
-    q: "Is SwapFX regulated?",
-    a: "SwapFX is registered with the FCA in the United Kingdom and complies with AML and KYC regulations across all operating regions.",
+    q: "Is Cashmova regulated?",
+    a: "Cashmova is registered with the FCA in the United Kingdom and complies with AML and KYC regulations across all operating regions.",
   },
   {
     q: "What payment methods are accepted?",
