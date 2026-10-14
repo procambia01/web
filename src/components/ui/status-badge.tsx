@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import { SWAP_STATUS_COLORS, OFFER_STATUS_COLORS } from '@/lib/constants'
+import { SWAP_STATUS_STYLE, OFFER_STATUS_STYLE } from '@/lib/constants'
 
 type Variant = 'success' | 'warning' | 'error' | 'info' | 'neutral' | 'primary'
 
@@ -34,16 +34,16 @@ export function StatusBadge({ label, variant = 'neutral', dot, className }: Stat
 
 // Convenience wrappers
 export function SwapStatusBadge({ status }: { status: string }) {
-  const cls = SWAP_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'
+  const cls = SWAP_STATUS_STYLE[status] ?? 'bg-gray-100 text-gray-600'
   return (
     <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide font-body', cls)}>
-      {status.replace('_', ' ')}
+      {status.replace(/_/g, ' ')}
     </span>
   )
 }
 
 export function OfferStatusBadge({ status }: { status: string }) {
-  const cls = OFFER_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'
+  const cls = OFFER_STATUS_STYLE[status] ?? 'bg-gray-100 text-gray-600'
   return (
     <span className={cn('inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide font-body', cls)}>
       {status}

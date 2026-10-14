@@ -1,247 +1,79 @@
-"use client";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import toast from "react-hot-toast";
-import { Eye, EyeOff, Loader2, UserPlus } from "lucide-react";
-import { useState } from "react";
-import { useAuthStore } from "@/store/auth.store";
-import { registerSchema, type RegisterFormData } from "@/lib/validators";
-import { cn } from "@/lib/utils";
+'use client'
+import { Suspense, useState } from 'react'
+import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { registerSchema } from '@/contracts'
+import { errorMessage, api } from '@/lib/api'
+import { validate, serverErrors, type FieldErrors } from '@/lib/form'
+import { useAuthStore } from '@/store/auth.store'
+import { Button } from '@/components/ui/button'
+import { Checkbox, Field, TextInput } from '@/components/ui/field'
+import { Notice } from '@/components/ui/states'
+import { useEffect } from 'react'
 
-const Field = ({
-  label,
-  error,
-  required,
-  children,
-}: {
-  label: string;
-  error?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) => (
-  <div className="space-y-1.5">
-    <label className="text-sm font-semibold text-[var(--color-text-secondary)] font-body">
-      {label}
-      {required && <span className="text-[var(--color-error)] ml-0.5">*</span>}
-    </label>
-    {children}
-    {error && (
-      <p className="text-xs text-[var(--color-error)] font-body">{error}</p>
-    )}
-  </div>
-);
+function RegisterForm() {
+  const router = useRouter()
+  const params = useSearchParams()
+  const register = useAuthStore((s) => s.register)
+  const [f, setF] = useState({ name: '', email: '', password: '', phone: '', referralCode: params.get('ref') ?? '' })
+  const [agree, setAgree] = useState(false)
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [formError, setFormError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((p) => ({ ...p, [k]: e.target.value }))
 
-const inputCls = (err?: string) =>
-  cn(
-    "w-full h-11 px-4 rounded-xl border bg-[var(--color-surface)] font-body text-sm",
-    "text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]",
-    "transition-all outline-none focus:ring-2",
-    err
-      ? "border-[var(--color-error)] focus:border-[var(--color-error)] focus:ring-[var(--color-error)]/20"
-      : "border-[var(--color-border)] focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)]/20",
-  );
+  useEffect(() => {
+    const code = params.get('ref')
+    if (code) void api.post(`/referrals/click/${encodeURIComponent(code)}`).catch(() => undefined)
+  }, [params])
 
-export default function RegisterPage() {
-  const router = useRouter();
-  const { register: registerUser, isLoading } = useAuthStore();
-  const [showPw, setShowPw] = useState(false);
-  const [showConf, setShowConf] = useState(false);
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<RegisterFormData>({
-    resolver: zodResolver(registerSchema),
-  });
-
-  const onSubmit = async (data: RegisterFormData) => {
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setFormError('')
+    const { data, errors: errs } = validate(registerSchema, { ...f, phone: f.phone.trim() || undefined, referralCode: f.referralCode.trim() || undefined })
+    if (!agree) errs.terms = 'Please accept the terms to continue'
+    setErrors(errs)
+    if (!data || !agree) return
+    setBusy(true)
     try {
-      const { confirmPassword, ...payload } = data;
-      await registerUser(payload);
-      toast.success(
-        "Account created! Please check your email to verify your account.",
-      );
-      // Redirect to verify-email page, NOT dashboard
-      // The user must verify their email before accessing the platform
-      router.push("/verify-email");
-    } catch {
-      toast.error("Registration failed. Please try again.");
+      await register(data)
+      router.replace('/dashboard')
+    } catch (err) {
+      setErrors(serverErrors(err))
+      setFormError(errorMessage(err))
+    } finally {
+      setBusy(false)
     }
-  };
+  }
 
   return (
-    <div className="space-y-7">
+    <form onSubmit={submit} className="space-y-4" noValidate>
       <div>
-        <h2 className="font-display font-bold text-3xl text-[var(--color-text-primary)] tracking-tight">
-          Create account
-        </h2>
-        <p className="mt-2 text-[var(--color-text-secondary)] font-body text-sm">
-          Join Cashmova and start exchanging currencies safely
-        </p>
+        <h1 className="font-display text-3xl font-bold text-[var(--color-text-primary)]">Create your account</h1>
+        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Free to join. No fee on swaps between members.</p>
       </div>
-
-      {/* Step indicator */}
-      <div className="flex items-center gap-2">
-        {["Account", "Verify Email", "Start Trading"].map((s, i) => (
-          <div key={s} className="flex items-center gap-2">
-            <div
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold font-body",
-                i === 0
-                  ? "bg-[var(--color-primary)] text-white"
-                  : "bg-[var(--color-border)] text-[var(--color-text-muted)]",
-              )}
-            >
-              {i + 1}
-            </div>
-            <span
-              className={cn(
-                "text-xs font-body",
-                i === 0
-                  ? "text-[var(--color-primary)] font-semibold"
-                  : "text-[var(--color-text-muted)]",
-              )}
-            >
-              {s}
-            </span>
-            {i < 2 && <div className="h-px w-4 bg-[var(--color-border)]" />}
-          </div>
-        ))}
+      {formError && <Notice tone="error">{formError}</Notice>}
+      <Field label="Full name" error={errors.name} htmlFor="name"><TextInput id="name" autoComplete="name" value={f.name} onChange={set('name')} invalid={!!errors.name} /></Field>
+      <Field label="Email" error={errors.email} htmlFor="email"><TextInput id="email" type="email" autoComplete="email" value={f.email} onChange={set('email')} invalid={!!errors.email} /></Field>
+      <Field label="Password" error={errors.password} hint="At least 10 characters with upper and lower case and a number." htmlFor="password">
+        <TextInput id="password" type="password" autoComplete="new-password" value={f.password} onChange={set('password')} invalid={!!errors.password} />
+      </Field>
+      <Field label="Mobile number (optional)" error={errors.phone} hint="International format, e.g. +442071234567" htmlFor="phone">
+        <TextInput id="phone" type="tel" autoComplete="tel" value={f.phone} onChange={set('phone')} invalid={!!errors.phone} placeholder="+442071234567" />
+      </Field>
+      <Field label="Referral code (optional)" error={errors.referralCode} htmlFor="ref"><TextInput id="ref" value={f.referralCode} onChange={set('referralCode')} /></Field>
+      <div>
+        <Checkbox checked={agree} onChange={setAgree}>
+          I understand CashMouver only connects people. I exchange cash directly with other members, and CashMouver never holds, escrows or refunds that money.
+        </Checkbox>
+        {errors.terms && <p role="alert" className="mt-1 text-xs text-[var(--color-error)]">{errors.terms}</p>}
       </div>
+      <Button type="submit" size="lg" className="h-10 w-full" disabled={busy}>{busy ? 'Creating account…' : 'Create account'}</Button>
+      <p className="text-center text-sm text-[var(--color-text-secondary)]">Already a member? <Link href="/login" className="text-[var(--color-primary)] hover:underline">Sign in</Link></p>
+    </form>
+  )
+}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <Field label="Full Name" error={errors.name?.message} required>
-          <input
-            {...register("name")}
-            type="text"
-            autoComplete="name"
-            placeholder="Your full name"
-            className={inputCls(errors.name?.message)}
-          />
-        </Field>
-
-        <Field label="Email Address" error={errors.email?.message} required>
-          <input
-            {...register("email")}
-            type="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            className={inputCls(errors.email?.message)}
-          />
-        </Field>
-
-        <Field label="Phone Number" error={errors.phone?.message}>
-          <input
-            {...register("phone")}
-            type="tel"
-            autoComplete="tel"
-            placeholder="+1 234 567 8900"
-            className={inputCls(errors.phone?.message)}
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Password" error={errors.password?.message} required>
-            <div className="relative">
-              <input
-                {...register("password")}
-                type={showPw ? "text" : "password"}
-                placeholder="Min 8 characters"
-                className={cn(inputCls(errors.password?.message), "pr-10")}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPw((p) => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-              >
-                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-          </Field>
-
-          <Field
-            label="Confirm Password"
-            error={errors.confirmPassword?.message}
-            required
-          >
-            <div className="relative">
-              <input
-                {...register("confirmPassword")}
-                type={showConf ? "text" : "password"}
-                placeholder="Repeat password"
-                className={cn(
-                  inputCls(errors.confirmPassword?.message),
-                  "pr-10",
-                )}
-              />
-              <button
-                type="button"
-                onClick={() => setShowConf((p) => !p)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-              >
-                {showConf ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-          </Field>
-        </div>
-
-        <Field label="Referral Code" error={errors.referralCode?.message}>
-          <input
-            {...register("referralCode")}
-            type="text"
-            placeholder="Optional"
-            className={inputCls(errors.referralCode?.message)}
-          />
-        </Field>
-
-        <p className="text-xs text-[var(--color-text-muted)] font-body">
-          By creating an account you agree to our{" "}
-          <Link
-            href="/terms"
-            className="text-[var(--color-primary)] hover:underline"
-          >
-            Terms
-          </Link>{" "}
-          and{" "}
-          <Link
-            href="/privacy"
-            className="text-[var(--color-primary)] hover:underline"
-          >
-            Privacy Policy
-          </Link>
-        </p>
-
-        <button
-          type="submit"
-          disabled={isLoading}
-          className={cn(
-            "w-full h-12 rounded-xl font-display font-semibold text-white text-sm mt-1",
-            "bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)]",
-            "shadow-[var(--shadow-primary)] transition-all flex items-center justify-center gap-2",
-            "disabled:opacity-60 disabled:cursor-not-allowed",
-          )}
-        >
-          {isLoading ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : (
-            <UserPlus size={18} />
-          )}
-          {isLoading ? "Creating account…" : "Create Account"}
-        </button>
-      </form>
-
-      <p className="text-center text-sm text-[var(--color-text-secondary)] font-body">
-        Already have an account?{" "}
-        <Link
-          href="/login"
-          className="text-[var(--color-primary)] font-semibold hover:underline"
-        >
-          Sign in
-        </Link>
-      </p>
-    </div>
-  );
+export default function RegisterPage() {
+  return <Suspense><RegisterForm /></Suspense>
 }

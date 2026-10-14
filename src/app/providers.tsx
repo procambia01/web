@@ -1,58 +1,54 @@
-"use client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { ThemeProvider } from "next-themes";
-import { Toaster } from "react-hot-toast";
-import { useState, useEffect, type ReactNode } from "react";
-import { NuqsAdapter } from "nuqs/adapters/next/app";
-import { useAuthStore } from "@/store/auth.store";
+'use client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ThemeProvider } from 'next-themes'
+import { Toaster } from 'react-hot-toast'
+import { useEffect, useState, type ReactNode } from 'react'
+import { NuqsAdapter } from 'nuqs/adapters/next/app'
+import { useRouter } from 'next/navigation'
+import { useAuthStore } from '@/store/auth.store'
+import { AUTH_LOST_EVENT, ApiError } from '@/lib/api'
+import { ReauthDialog } from '@/components/shared/ReauthDialog'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 60_000,
-      retry: 1,
-      refetchOnWindowFocus: false,
+function makeClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
+        retry: (count, err) => !(err instanceof ApiError && err.status >= 400 && err.status < 500) && count < 2,
+      },
     },
-  },
-});
+  })
+}
 
 function AuthInit() {
-  const init = useAuthStore((s) => s.init);
+  const init = useAuthStore((s) => s.init)
+  const clear = useAuthStore((s) => s.clear)
+  const router = useRouter()
   useEffect(() => {
-    init();
-  }, [init]);
-  return null;
+    void init()
+    const lost = () => {
+      clear()
+      router.replace('/login')
+    }
+    window.addEventListener(AUTH_LOST_EVENT, lost)
+    return () => window.removeEventListener(AUTH_LOST_EVENT, lost)
+  }, [init, clear, router])
+  return null
 }
 
 export function Providers({ children }: { children: ReactNode }) {
+  const [client] = useState(makeClient)
   return (
-    // NuqsAdapter fixes the SSR hydration mismatch on pages using useQueryState
-    // (offers page, swaps page tab state) — must wrap the entire app
     <NuqsAdapter>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="light"
-          disableTransitionOnChange
-        >
+      <QueryClientProvider client={client}>
+        <ThemeProvider attribute="class" defaultTheme="light" disableTransitionOnChange>
           <AuthInit />
           {children}
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                fontFamily: "var(--font-body)",
-                fontSize: "14px",
-                borderRadius: "12px",
-                boxShadow: "var(--shadow-lg)",
-              },
-            }}
-          />
+          <ReauthDialog />
+          <Toaster position="top-right" toastOptions={{ duration: 4000, style: { fontSize: '14px', borderRadius: '12px' } }} />
         </ThemeProvider>
-        <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
     </NuqsAdapter>
-  );
+  )
 }

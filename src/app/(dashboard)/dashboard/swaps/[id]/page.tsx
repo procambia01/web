@@ -1,439 +1,174 @@
 'use client'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useParams, useRouter } from 'next/navigation'
-import {
-  ArrowLeft, ArrowLeftRight, MapPin, Calendar, CheckCircle2,
-  XCircle, MessageSquare, Star, AlertTriangle, Clock,
-  Send, Check, CheckCheck, ChevronRight,
-} from 'lucide-react'
+import { use, useState } from 'react'
 import Link from 'next/link'
-import { motion } from 'framer-motion'
+import { useRouter } from 'next/navigation'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { parseAsString, useQueryState } from 'nuqs'
+import { AlertTriangle, ArrowRight, Check, Clock, Hourglass, Star } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useState } from 'react'
-import { swapService, feeService } from '@/services'
+import { DISPUTE_REASONS, type SwapDto, type SwapEventDto } from '@/contracts'
+import { api, errorMessage } from '@/lib/api'
+import { useCurrencies } from '@/hooks/useCurrencies'
+import { enumLabel, formatDateTime, formatRate, timeLeft } from '@/lib/format'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field, NativeSelect, TextArea } from '@/components/ui/field'
+import { ErrorState, Notice, PageLoader } from '@/components/ui/states'
 import { SwapStatusBadge } from '@/components/ui/status-badge'
 import { UserAvatar } from '@/components/ui/user-avatar'
-import { useAuthStore } from '@/store/auth.store'
-import {
-  formatCurrency, formatDateTime, formatRelative,
-  formatRating, getCurrencyFlag, trustScoreLabel, trustScoreColor,
-} from '@/lib/format'
-import { cn } from '@/lib/utils'
-import type { Swap } from '@/types'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TrustBadges } from '@/components/shared/TrustBadges'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { MeetupPanel } from '@/components/shared/MeetupPanel'
+import { ChatPanel } from '@/components/shared/ChatPanel'
+import { RatingDialog } from '@/components/shared/RatingDialog'
 
-// ── Timeline step ─────────────────────────────────────────
-const STEPS = [
-  { key: 'PENDING',     label: 'Requested',      icon: Clock       },
-  { key: 'AGREED',      label: 'Agreed',          icon: CheckCircle2 },
-  { key: 'IN_PROGRESS', label: 'Meeting Set',     icon: MapPin      },
-  { key: 'CONFIRMING',  label: 'Confirming',      icon: Send        },
-  { key: 'COMPLETED',   label: 'Completed',       icon: CheckCheck  },
-]
-const STATUS_ORDER = STEPS.map(s => s.key)
-
-function SwapTimeline({ status }: { status: string }) {
-  const current = STATUS_ORDER.indexOf(status)
-  const isFailed = ['CANCELLED','DISPUTED','FAILED','EXPIRED'].includes(status)
+function DisputeDialog({ swapId, open, onOpenChange }: { swapId: string; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const router = useRouter()
+  const [reason, setReason] = useState<string>('NO_SHOW')
+  const [description, setDescription] = useState('')
+  const m = useMutation({
+    mutationFn: () => api.post<{ id: string }>(`/swaps/${swapId}/dispute`, { reason, description: description.trim() }),
+    onSuccess: (d) => { toast.success('Dispute opened. Our team will review it.'); router.push(`/dashboard/disputes/${d.id}`) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
-    <div className="flex items-center gap-0">
-      {STEPS.map((step, i) => {
-        const done   = !isFailed && i < current
-        const active = !isFailed && i === current
-        const Icon   = step.icon
-        return (
-          <div key={step.key} className="flex items-center flex-1 last:flex-none">
-            <div className="flex flex-col items-center gap-1.5">
-              <div className={cn(
-                'w-9 h-9 rounded-full flex items-center justify-center border-2 transition-all',
-                done   ? 'bg-emerald-500 border-emerald-500 text-white' :
-                active ? 'bg-[var(--color-primary)] border-[var(--color-primary)] text-white shadow-[var(--shadow-primary)]' :
-                isFailed && i <= current ? 'bg-red-500 border-red-500 text-white' :
-                'bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text-muted)]',
-              )}>
-                {done ? <Check size={16} /> : <Icon size={15} />}
-              </div>
-              <span className={cn(
-                'text-[10px] font-semibold font-body whitespace-nowrap',
-                done || active ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]',
-              )}>
-                {step.label}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div className={cn(
-                'flex-1 h-0.5 mb-5 mx-1',
-                done ? 'bg-emerald-500' : 'bg-[var(--color-border)]',
-              )} />
-            )}
-          </div>
-        )
-      })}
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Open a dispute</DialogTitle><DialogDescription>Describe what went wrong. You can add photos or documents as evidence afterwards.</DialogDescription></DialogHeader>
+        <Notice tone="warning">CashMouver reviews conduct and evidence and can warn or restrict accounts. We cannot recover or refund the cash you exchanged.</Notice>
+        <Field label="What happened?"><NativeSelect value={reason} onChange={(e) => setReason(e.target.value)}>{DISPUTE_REASONS.map((r) => <option key={r} value={r}>{enumLabel(r)}</option>)}</NativeSelect></Field>
+        <Field label="Details" hint="At least 10 characters"><TextArea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} /></Field>
+        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" disabled={description.trim().length < 10 || m.isPending} onClick={() => m.mutate()}>{m.isPending ? 'Opening…' : 'Open dispute'}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-// ── Confirmation checks ───────────────────────────────────
-function ConfirmRow({ label, checked }: { label: string; checked: boolean }) {
+function ExtendDialog({ swapId, open, onOpenChange, onDone }: { swapId: string; open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void }) {
+  const [hours, setHours] = useState('6')
+  const m = useMutation({
+    mutationFn: () => api.post(`/swaps/${swapId}/extend`, { hours: Number(hours) }),
+    onSuccess: () => { toast.success('Deadline extended'); onDone(); onOpenChange(false) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   return (
-    <div className="flex items-center gap-3 py-2.5">
-      <div className={cn(
-        'w-5 h-5 rounded-full flex items-center justify-center shrink-0',
-        checked ? 'bg-emerald-500' : 'bg-[var(--color-border)]',
-      )}>
-        {checked && <Check size={11} className="text-white" />}
-      </div>
-      <span className={cn('text-sm font-body', checked ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-        {label}
-      </span>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader><DialogTitle>Extend the deadline</DialogTitle><DialogDescription>Give both of you more time. The reserved amount stays set aside on the offer.</DialogDescription></DialogHeader>
+        <Field label="Extra time"><NativeSelect value={hours} onChange={(e) => setHours(e.target.value)}>{['1', '3', '6', '12', '24', '48'].map((h) => <option key={h} value={h}>{h} hour{h === '1' ? '' : 's'}</option>)}</NativeSelect></Field>
+        <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={() => m.mutate()} disabled={m.isPending}>Extend</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-// ── Detail row ────────────────────────────────────────────
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-2.5 border-b border-[var(--color-divider)] last:border-0">
-      <span className="text-sm text-[var(--color-text-secondary)] font-body">{label}</span>
-      <span className="text-sm font-semibold text-[var(--color-text-primary)] font-body text-right">{value}</span>
-    </div>
-  )
-}
-
-// ── Rating Modal ──────────────────────────────────────────
-function RatingModal({ swapId, onClose }: { swapId: string; onClose: () => void }) {
+export default function SwapDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params)
   const qc = useQueryClient()
-  const [stars, setStars]     = useState(0)
-  const [comment, setComment] = useState('')
-  const [loading, setLoading] = useState(false)
+  const { money } = useCurrencies()
+  const [tab, setTab] = useQueryState('tab', parseAsString.withDefault('details'))
+  const [dlg, setDlg] = useState<null | 'cancel' | 'reject' | 'dispute' | 'extend' | 'rate' | 'confirm'>(null)
 
-  const handleSubmit = async () => {
-    if (!stars) { toast.error('Please select a rating'); return }
-    setLoading(true)
-    try {
-      await swapService.rate(swapId, { stars, comment: comment || undefined })
-      toast.success('Rating submitted!')
-      qc.invalidateQueries({ queryKey: ['swap', swapId] })
-      onClose()
-    } catch { toast.error('Failed to submit rating') }
-    finally { setLoading(false) }
+  const q = useQuery({ queryKey: ['swap', id], queryFn: () => api.get<SwapDto>(`/swaps/${id}`), refetchInterval: 15_000 })
+  const events = useQuery({ queryKey: ['swap-events', id], queryFn: () => api.get<SwapEventDto[]>(`/swaps/${id}/events`), enabled: tab === 'history' })
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['swap', id] }); void qc.invalidateQueries({ queryKey: ['swaps'] }); void qc.invalidateQueries({ queryKey: ['swap-events', id] })
+    void qc.invalidateQueries({ queryKey: ['entitlements'] }); void qc.invalidateQueries({ queryKey: ['unread'] })
   }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-[var(--shadow-xl)] p-6">
-        <h3 className="font-display font-bold text-xl text-[var(--color-text-primary)] mb-2">Rate this Swap</h3>
-        <p className="text-sm text-[var(--color-text-secondary)] font-body mb-6">How was your experience?</p>
-        <div className="flex items-center justify-center gap-2 mb-6">
-          {[1,2,3,4,5].map(s => (
-            <button key={s} onClick={() => setStars(s)}
-              className={cn('text-3xl transition-transform hover:scale-110', s <= stars ? 'text-amber-400' : 'text-[var(--color-border)]')}>
-              ★
-            </button>
-          ))}
-        </div>
-        <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3}
-          placeholder="Leave a comment (optional)…"
-          className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] text-sm font-body text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 resize-none mb-5"
-        />
-        <div className="flex gap-3">
-          <button onClick={onClose}
-            className="flex-1 h-10 rounded-xl border border-[var(--color-border)] text-sm font-semibold font-body text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] transition-colors">
-            Cancel
-          </button>
-          <button onClick={handleSubmit} disabled={loading || !stars}
-            className="flex-1 h-10 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
-            <Star size={15} /> Submit
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  )
-}
-
-// ── Main page ─────────────────────────────────────────────
-export default function SwapDetailPage() {
-  const { id }     = useParams<{ id: string }>()
-  const router     = useRouter()
-  const { user }   = useAuthStore()
-  const qc         = useQueryClient()
-  const [ratingOpen, setRatingOpen] = useState(false)
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['swap', id],
-    queryFn:  () => swapService.getById(id),
+  const act = useMutation({
+    mutationFn: ({ path, body }: { path: string; body?: unknown }) => api.post<SwapDto>(`/swaps/${id}/${path}`, body),
+    onSuccess: (_d, v) => { refresh(); if (v.path === 'accept') toast.success('Swap accepted — plan the meetup'); if (v.path === 'confirm') toast.success('Confirmation recorded') },
+    onError: (e) => { toast.error(errorMessage(e)); refresh() },
   })
 
-  const swap = data?.data
-
-  const { data: feeData } = useQuery({
-    queryKey: ['swap-fee', id],
-    queryFn:  () => feeService.getStatus(id),
-    enabled:  swap?.status === 'COMPLETED',
-  })
-  const fee = feeData?.data
-  const [isPayingFee, setIsPayingFee] = useState(false)
-
-  const handlePayFee = async () => {
-    setIsPayingFee(true)
-    try {
-      const res = await feeService.createCheckout(id)
-      if (res.data.url) window.location.href = res.data.url
-    } catch {
-      toast.error('Could not start checkout')
-    } finally {
-      setIsPayingFee(false)
-    }
-  }
-
-  if (isLoading || !swap) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
-
-  const isInit  = swap.initiatorId === user?.id
-  const me      = isInit ? swap.initiator : swap.receiver
-  const partner = isInit ? swap.receiver  : swap.initiator
-  const myGivesCurr = isInit ? swap.initiatorGivesCurrency : swap.receiverGivesCurrency
-  const myGivesAmt  = isInit ? swap.initiatorGivesAmount   : swap.receiverGivesAmount
-  const myGetsCurr  = isInit ? swap.receiverGivesCurrency  : swap.initiatorGivesCurrency
-  const myGetsAmt   = isInit ? swap.receiverGivesAmount    : swap.initiatorGivesAmount
-  const mySent      = isInit ? swap.initiatorSentConfirmed    : swap.receiverSentConfirmed
-  const myReceived  = isInit ? swap.initiatorReceivedConfirmed : swap.receiverReceivedConfirmed
-  const theirSent   = isInit ? swap.receiverSentConfirmed    : swap.initiatorSentConfirmed
-
-  const canAccept   = !isInit && swap.status === 'PENDING'
-  const canSent     = ['AGREED','IN_PROGRESS','CONFIRMING'].includes(swap.status) && !mySent
-  const canReceived = mySent && !myReceived && swap.status === 'CONFIRMING'
-  const canCancel   = ['PENDING','AGREED'].includes(swap.status)
-  const canRate     = swap.status === 'COMPLETED'
-
-  const mutate = async (fn: () => Promise<unknown>, msg: string) => {
-    try { await fn(); toast.success(msg); qc.invalidateQueries({ queryKey: ['swap', id] }) }
-    catch { toast.error('Action failed') }
-  }
+  if (q.isLoading) return <PageLoader />
+  if (q.error || !q.data) return <ErrorState error={q.error} onRetry={() => q.refetch()} />
+  const s = q.data
+  const other = s.iAm === 'INITIATOR' ? s.receiver : s.initiator
+  const terms = s.agreed ?? s.requested
+  const give = s.iAm === 'INITIATOR' ? { amount: terms.wantAmount, ccy: s.wantCurrency } : { amount: terms.haveAmount, ccy: s.haveCurrency }
+  const get = s.iAm === 'INITIATOR' ? { amount: terms.haveAmount, ccy: s.haveCurrency } : { amount: terms.wantAmount, ccy: s.wantCurrency }
+  const can = (a: SwapDto['allowedActions'][number]) => s.allowedActions.includes(a)
+  const active = ['PENDING', 'AGREED', 'IN_PROGRESS', 'CONFIRMING'].includes(s.status)
 
   return (
-    <>
-      {ratingOpen && <RatingModal swapId={id} onClose={() => setRatingOpen(false)} />}
+    <div className="max-w-5xl">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-3"><h1 className="text-2xl">Swap with {other.name}</h1><SwapStatusBadge status={s.status} /></div>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Created {formatDateTime(s.createdAt)} · <Link href={`/dashboard/offers/${s.offerId}`} className="underline">view offer</Link></p>
+        </div>
+        {['PENDING', 'AGREED'].includes(s.status) && <p className="flex items-center gap-1.5 rounded-full bg-[var(--color-warning-bg)] px-3 py-1 text-xs font-semibold text-[var(--color-warning-text)] dark:bg-amber-950 dark:text-amber-300"><Hourglass size={12} /> Expires in {timeLeft(s.expiresAt)}</p>}
+      </div>
 
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-5">
-        {/* Header */}
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.back()}
-            className="w-9 h-9 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg)] transition-colors">
-            <ArrowLeft size={18} />
-          </button>
-          <div className="flex-1">
-            <h1 className="font-display font-bold text-2xl text-[var(--color-text-primary)] tracking-tight">Swap Details</h1>
-            <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">#{id.slice(-10).toUpperCase()}</p>
+      <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div><p className="text-xs text-[var(--color-text-muted)]">You give</p><p className="font-display text-2xl font-bold">{money(give.amount, give.ccy)}</p></div>
+        <ArrowRight className="mx-3 text-[var(--color-text-muted)]" />
+        <div><p className="text-xs text-[var(--color-text-muted)]">You receive</p><p className="font-display text-2xl font-bold text-[var(--color-primary)]">{money(get.amount, get.ccy)}</p></div>
+        <p className="ml-auto text-sm text-[var(--color-text-secondary)]">1 {s.haveCurrency} = {formatRate(terms.exchangeRate)} {s.wantCurrency}{s.agreed && <span className="ml-1 rounded bg-[var(--color-success-bg)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--color-success-text)] dark:bg-emerald-950 dark:text-emerald-300">Locked</span>}</p>
+      </div>
+
+      {s.status === 'PENDING' && s.iAm === 'INITIATOR' && <Notice tone="info" className="mb-4">Waiting for {other.name} to accept. The amount is set aside on their offer until then.</Notice>}
+      {s.status === 'CONFIRMING' && <Notice tone="info" className="mb-4">{s.myConfirmed ? `You confirmed. Waiting for ${other.name} to confirm.` : s.otherConfirmed ? `${other.name} has confirmed. Confirm once you have handed over and received your cash.` : 'Confirm once you have handed over and received your cash.'}</Notice>}
+      {s.status === 'DISPUTED' && <Notice tone="warning" className="mb-4">This swap is under review. <Link href="/dashboard/disputes" className="font-semibold underline">View your disputes</Link></Notice>}
+      {s.status === 'CANCELLED' && s.cancellationReason && <Notice tone="info" className="mb-4">Cancelled: {s.cancellationReason}</Notice>}
+
+      <div className="mb-6 flex flex-wrap gap-2">
+        {can('ACCEPT') && <Button disabled={act.isPending} onClick={() => act.mutate({ path: 'accept' })}><Check size={14} /> Accept swap</Button>}
+        {can('REJECT') && <Button variant="outline" onClick={() => setDlg('reject')}>Decline</Button>}
+        {s.status === 'AGREED' && <Button disabled={act.isPending} onClick={() => act.mutate({ path: 'start' })}>We&apos;re meeting now</Button>}
+        {can('CONFIRM') && <Button disabled={act.isPending} onClick={() => setDlg('confirm')}><Check size={14} /> I handed over and received my cash</Button>}
+        {can('EXTEND') && <Button variant="outline" onClick={() => setDlg('extend')}><Clock size={14} /> Extend time</Button>}
+        {can('RATE') && <Button variant="outline" onClick={() => setDlg('rate')}><Star size={14} /> Rate {other.name}</Button>}
+        {can('CANCEL') && <Button variant="ghost" onClick={() => setDlg('cancel')}>Cancel swap</Button>}
+        {can('DISPUTE') && <Button variant="destructive" onClick={() => setDlg('dispute')}><AlertTriangle size={14} /> Report a problem</Button>}
+      </div>
+
+      <Tabs value={tab} onValueChange={(v) => void setTab(v)}>
+        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="meetup">Meetup</TabsTrigger><TabsTrigger value="chat">Chat{!!s.unreadMessages && ` (${s.unreadMessages})`}</TabsTrigger><TabsTrigger value="history">History</TabsTrigger></TabsList>
+        <TabsContent value="details" className="mt-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            {[s.initiator, s.receiver].map((u, i) => (
+              <Card key={u.id}>
+                <CardHeader><CardTitle className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">{i === 0 ? 'Requester' : 'Offer owner'}{u.id === other.id ? '' : ' (you)'}</CardTitle></CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex items-center gap-3"><UserAvatar name={u.name} image={u.image} verified={u.verified} /><div><p className="font-semibold">{u.name}</p><p className="text-xs text-[var(--color-text-muted)]">{[u.city, u.country].filter(Boolean).join(', ')}</p></div></div>
+                  <TrustBadges user={u} />
+                  <p className="text-xs text-[var(--color-text-secondary)]">{(i === 0 ? s.iAm === 'INITIATOR' ? s.myConfirmed : s.otherConfirmed : s.iAm === 'RECEIVER' ? s.myConfirmed : s.otherConfirmed) ? '✓ Confirmed exchange' : 'Not yet confirmed'}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
-          <SwapStatusBadge status={swap.status} />
-          <Link href={`/dashboard/messages/${id}`}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)]">
-            <MessageSquare size={15} /> Chat
-          </Link>
-        </div>
-
-        {/* Timeline */}
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)]">
-          <SwapTimeline status={swap.status} />
-          {['CANCELLED','DISPUTED','FAILED','EXPIRED'].includes(swap.status) && swap.cancellationReason && (
-            <div className="mt-4 flex items-start gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
-              <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700 font-body">{swap.cancellationReason}</p>
-            </div>
+          {s.agreed && <p className="mt-4 text-xs text-[var(--color-text-muted)]">Agreed {formatDateTime(s.agreed.agreedAt)}. These terms are frozen — later changes to the offer don&apos;t affect this swap.</p>}
+          {active && <p className="mt-2 text-xs text-[var(--color-text-muted)]">CashMouver never holds or moves the money in this swap. Exchange cash in person and count it before you hand yours over.</p>}
+        </TabsContent>
+        <TabsContent value="meetup" className="mt-4"><MeetupPanel swap={s} /></TabsContent>
+        <TabsContent value="chat" className="mt-4"><ChatPanel swapId={s.id} disabled={s.status === 'CANCELLED'} disabledReason="This swap was cancelled, so the chat is closed." /></TabsContent>
+        <TabsContent value="history" className="mt-4">
+          {events.isLoading ? <PageLoader /> : events.error ? <ErrorState error={events.error} /> : (
+            <ol className="space-y-3 border-l-2 border-[var(--color-border)] pl-5">
+              {(events.data ?? []).map((e) => (
+                <li key={e.id} className="relative"><span className="absolute -left-[27px] top-1.5 h-2.5 w-2.5 rounded-full bg-[var(--color-primary)]" />
+                  <p className="text-sm font-medium">{enumLabel(e.eventType)}{e.newStatus && e.newStatus !== e.previousStatus ? ` → ${enumLabel(e.newStatus)}` : ''}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{formatDateTime(e.createdAt)}{e.actor && ` · ${enumLabel(e.actor)}`}</p></li>
+              ))}
+            </ol>
           )}
-        </div>
+        </TabsContent>
+      </Tabs>
 
-        {/* Platform fee */}
-        {fee && fee.amount !== null && (
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] flex items-center justify-between">
-            <div>
-              <p className="font-display font-bold text-sm text-[var(--color-text-primary)]">Platform fee</p>
-              <p className="text-xs text-[var(--color-text-secondary)] font-body mt-0.5">
-                {fee.waived
-                  ? 'Waived — Premium member or referral bonus'
-                  : fee.paid
-                  ? 'Paid, thanks!'
-                  : `${fee.currency} ${fee.amount.toFixed(2)} due`}
-              </p>
-            </div>
-            {fee.waived || fee.paid ? (
-              <CheckCircle2 size={22} className="text-[var(--color-success,#10B981)]" />
-            ) : (
-              <button
-                onClick={handlePayFee}
-                disabled={isPayingFee}
-                className="h-9 px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors disabled:opacity-60"
-              >
-                {isPayingFee ? 'Loading…' : 'Pay'}
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Left: exchange + partner */}
-          <div className="lg:col-span-2 space-y-5">
-            {/* Exchange */}
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)]">
-              <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-5">Exchange Summary</h3>
-              <div className="grid grid-cols-3 items-center gap-4">
-                <div className="text-center">
-                  <p className="text-3xl mb-2">{getCurrencyFlag(myGivesCurr)}</p>
-                  <p className="font-display font-bold text-2xl text-red-600">
-                    -{formatCurrency(myGivesAmt, myGivesCurr)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body mt-1">You give</p>
-                  {mySent && (
-                    <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-body">
-                      <Check size={10} /> Sent
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-10 h-10 rounded-full bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-center">
-                    <ArrowLeftRight size={18} className="text-[var(--color-text-muted)]" />
-                  </div>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body text-center">
-                    Rate {swap.agreedExchangeRate.toFixed(4)}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-3xl mb-2">{getCurrencyFlag(myGetsCurr)}</p>
-                  <p className="font-display font-bold text-2xl text-emerald-600">
-                    +{formatCurrency(myGetsAmt, myGetsCurr)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body mt-1">You receive</p>
-                  {myReceived && (
-                    <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-body">
-                      <Check size={10} /> Received
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Partner */}
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)]">
-              <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-4">Partner</h3>
-              <div className="flex items-center gap-4">
-                <UserAvatar name={partner.name} image={partner.image} size="lg" verified={partner.idVerified} />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-display font-bold text-lg text-[var(--color-text-primary)]">{partner.name}</p>
-                    {partner.idVerified && (
-                      <span className="text-xs text-[var(--color-primary)] bg-[var(--color-primary-light)] px-2 py-0.5 rounded-full font-body font-semibold">
-                        Verified
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 mt-2">
-                    <span className="text-sm text-[var(--color-text-secondary)] font-body">
-                      ⭐ {formatRating(partner.rating)}
-                    </span>
-                    <span className="text-[var(--color-border)]">·</span>
-                    <span className="text-sm text-[var(--color-text-secondary)] font-body">
-                      {partner.totalSwaps} swaps
-                    </span>
-                    <span className="text-[var(--color-border)]">·</span>
-                    <span className={cn('text-sm font-semibold font-body', trustScoreColor(partner.trustScore))}>
-                      {trustScoreLabel(partner.trustScore)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Confirmation status */}
-              <div className="mt-4 pt-4 border-t border-[var(--color-divider)]">
-                <p className="text-xs font-semibold text-[var(--color-text-secondary)] font-body uppercase tracking-wide mb-1">Confirmations</p>
-                <ConfirmRow label={`${isInit ? 'You' : partner.name} sent currency`} checked={mySent} />
-                <ConfirmRow label={`${isInit ? partner.name : 'You'} sent currency`} checked={theirSent} />
-                <ConfirmRow label={`${isInit ? 'You' : partner.name} confirmed receipt`} checked={myReceived} />
-                <ConfirmRow
-                  label={`${isInit ? partner.name : 'You'} confirmed receipt`}
-                  checked={isInit ? swap.receiverReceivedConfirmed : swap.initiatorReceivedConfirmed}
-                />
-              </div>
-            </div>
-
-            {/* Meetup */}
-            {swap.meetupLocation && (
-              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)]">
-                <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-4">Meetup Details</h3>
-                <div className="space-y-1">
-                  {swap.meetupLocation && <DetailRow label="Location" value={swap.meetupLocation} />}
-                  {swap.meetupAddress  && <DetailRow label="Address"  value={swap.meetupAddress} />}
-                  {swap.meetupTime     && <DetailRow label="Time"     value={formatDateTime(swap.meetupTime)} />}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: details + actions */}
-          <div className="space-y-5">
-            {/* Details */}
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)]">
-              <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-3">Details</h3>
-              <DetailRow label="You are" value={isInit ? 'Initiator' : 'Receiver'} />
-              <DetailRow label="Created" value={formatRelative(swap.createdAt)} />
-              {swap.completedAt && <DetailRow label="Completed" value={formatRelative(swap.completedAt)} />}
-              {swap.cancelledAt && <DetailRow label="Cancelled" value={formatRelative(swap.cancelledAt)} />}
-            </div>
-
-            {/* Actions */}
-            {(canAccept || canSent || canReceived || canCancel || canRate) && (
-              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)] space-y-2.5">
-                <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-3">Actions</h3>
-
-                {canAccept && (
-                  <button
-                    onClick={() => mutate(() => swapService.accept(id), 'Swap accepted!')}
-                    className="w-full h-10 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] flex items-center justify-center gap-2">
-                    <CheckCircle2 size={16} /> Accept Swap
-                  </button>
-                )}
-
-                {canSent && (
-                  <button
-                    onClick={() => mutate(() => swapService.confirmSent(id), 'Confirmed sent!')}
-                    className="w-full h-10 rounded-xl bg-[var(--color-accent)] text-white text-sm font-semibold font-body hover:bg-[var(--color-accent-dark)] transition-colors flex items-center justify-center gap-2">
-                    <Send size={15} /> Confirm I Sent
-                  </button>
-                )}
-
-                {canReceived && (
-                  <button
-                    onClick={() => mutate(() => swapService.confirmReceived(id), 'Receipt confirmed!')}
-                    className="w-full h-10 rounded-xl bg-emerald-600 text-white text-sm font-semibold font-body hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
-                    <CheckCheck size={16} /> Confirm Received
-                  </button>
-                )}
-
-                {canRate && (
-                  <button onClick={() => setRatingOpen(true)}
-                    className="w-full h-10 rounded-xl border border-[var(--color-primary)] text-[var(--color-primary)] text-sm font-semibold font-body hover:bg-[var(--color-primary-light)] transition-colors flex items-center justify-center gap-2">
-                    <Star size={15} /> Rate Swap
-                  </button>
-                )}
-
-                {canCancel && (
-                  <button
-                    onClick={() => {
-                      const reason = prompt('Reason for cancellation:')
-                      if (reason) mutate(() => swapService.cancel(id, reason), 'Swap cancelled')
-                    }}
-                    className="w-full h-10 rounded-xl border border-red-200 text-red-600 text-sm font-semibold font-body hover:bg-red-50 transition-colors flex items-center justify-center gap-2">
-                    <XCircle size={15} /> Cancel Swap
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    </>
+      <ConfirmDialog open={dlg === 'cancel'} onOpenChange={(o) => !o && setDlg(null)} destructive title="Cancel this swap?" description="The amount is released back to the offer. Repeated cancellations can affect your trust score." reasonLabel="Reason (shared with the other member)" confirmLabel="Cancel swap"
+        onConfirm={async (reason) => { await api.post(`/swaps/${id}/cancel`, { reason }); refresh() }} />
+      <ConfirmDialog open={dlg === 'reject'} onOpenChange={(o) => !o && setDlg(null)} title="Decline this request?" description="The reserved amount returns to your offer." confirmLabel="Decline"
+        onConfirm={async () => { await api.post(`/swaps/${id}/reject`, {}); refresh() }} />
+      <ConfirmDialog open={dlg === 'confirm'} onOpenChange={(o) => !o && setDlg(null)} title="Confirm the exchange?" description="Only confirm after you have both handed over and received your cash. You can't undo this." confirmLabel="Yes, confirm"
+        onConfirm={async () => { await act.mutateAsync({ path: 'confirm' }) }} />
+      <DisputeDialog swapId={id} open={dlg === 'dispute'} onOpenChange={(o) => !o && setDlg(null)} />
+      <ExtendDialog swapId={id} open={dlg === 'extend'} onOpenChange={(o) => !o && setDlg(null)} onDone={refresh} />
+      <RatingDialog swapId={id} open={dlg === 'rate'} onOpenChange={(o) => !o && setDlg(null)} onDone={refresh} />
+    </div>
   )
 }

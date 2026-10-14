@@ -1,94 +1,62 @@
 'use client'
-import { Bell, Menu, Search, Sun, Moon } from 'lucide-react'
+import { Bell, Menu, Sun, Moon, MessageSquare } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useUIStore } from '@/store/ui.store'
 import { useAuthStore } from '@/store/auth.store'
-import { cn } from '@/lib/utils'
+import { useUnread } from '@/hooks/useUnread'
 import { initials } from '@/lib/format'
+import { APP_NAME } from '@/lib/constants'
 
-// Build a readable page title from the pathname
-function usePageTitle(): string {
+const TITLES: [string, string][] = [
+  ['/dashboard/market', 'Find offers'], ['/dashboard/offers', 'My offers'], ['/dashboard/swaps', 'My swaps'], ['/dashboard/messages', 'Messages'],
+  ['/dashboard/notifications', 'Notifications'], ['/dashboard/rate-alerts', 'Rate alerts'], ['/dashboard/insights', 'Market insights'],
+  ['/dashboard/disputes', 'Disputes'], ['/dashboard/referrals', 'Referrals'], ['/dashboard/verification', 'Verification'], ['/dashboard/premium', 'Plans & boosts'],
+  ['/dashboard/billing', 'Billing'], ['/dashboard/business', 'Business'], ['/dashboard/advertising', 'Advertising'], ['/dashboard/developer', 'Developer API'],
+  ['/dashboard/settings', 'Settings'], ['/dashboard/profile', 'Profile'], ['/dashboard', 'Overview'],
+  ['/admin/users', 'Users'], ['/admin/verification', 'Verification queue'], ['/admin/disputes', 'Disputes'], ['/admin/risk', 'Risk flags'], ['/admin/ads', 'Ad review'],
+  ['/admin/audit-logs', 'Audit logs'], ['/admin/currencies', 'Currencies'], ['/admin/products', 'Products & plans'], ['/admin/limits', 'Limit policies'],
+  ['/admin/referral-rules', 'Referral rules'], ['/admin/templates', 'Notification templates'], ['/admin/config', 'Platform settings'], ['/admin/payments', 'Service payments'],
+  ['/admin/ledger', 'Revenue ledger'], ['/admin/webhooks', 'Stripe events'], ['/admin/api-keys', 'API keys'], ['/admin', 'Admin overview'],
+]
+
+function usePageTitle() {
   const p = usePathname()
-  if (p === '/dashboard')               return 'Dashboard'
-  if (p.startsWith('/dashboard/offers'))return 'My Offers'
-  if (p.startsWith('/dashboard/swaps')) return 'My Swaps'
-  if (p.startsWith('/dashboard/messages')) return 'Messages'
-  if (p.startsWith('/dashboard/notifications')) return 'Notifications'
-  if (p.startsWith('/dashboard/transactions')) return 'Transactions'
-  if (p.startsWith('/dashboard/referrals')) return 'Referrals'
-  if (p.startsWith('/dashboard/profile')) return 'Profile'
-  if (p.startsWith('/admin/users'))      return 'User Management'
-  if (p.startsWith('/admin/swaps'))      return 'Swap Management'
-  if (p.startsWith('/admin/disputes'))   return 'Disputes'
-  if (p.startsWith('/admin/verifications')) return 'Verifications'
-  if (p.startsWith('/admin/analytics'))  return 'Analytics'
-  if (p.startsWith('/admin'))            return 'Admin Overview'
-  return 'Cashmova'
+  return TITLES.find(([prefix]) => p.startsWith(prefix))?.[1] ?? APP_NAME
 }
+
+const iconBtn = 'relative flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--color-border)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text-primary)]'
 
 export function Topbar() {
   const { setTheme, resolvedTheme } = useTheme()
-  const { setMobileMenu }           = useUIStore()
-  const { user }                    = useAuthStore()
-  const title                       = usePageTitle()
+  const setMobileMenu = useUIStore((s) => s.setMobileMenu)
+  const user = useAuthStore((s) => s.user)
+  const title = usePageTitle()
+  const unread = useUnread()
 
   return (
-    <header className={cn(
-      'sticky top-0 z-30 h-16 flex items-center gap-4 px-4 sm:px-6',
-      'bg-[var(--color-surface)]/80 backdrop-blur border-b border-[var(--color-border)]',
-    )}>
-      {/* Mobile menu button */}
-      <button
-        onClick={() => setMobileMenu(true)}
-        className="lg:hidden text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-      >
-        <Menu size={22} />
-      </button>
-
-      {/* Page title */}
-      <h1 className="font-display font-bold text-[var(--color-text-primary)] text-lg">
-        {title}
-      </h1>
-
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)]/80 px-4 backdrop-blur sm:px-6">
+      <button onClick={() => setMobileMenu(true)} aria-label="Open menu" className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] lg:hidden"><Menu size={22} /></button>
+      <h1 className="font-display text-lg font-bold text-[var(--color-text-primary)]">{title}</h1>
       <div className="flex-1" />
-
-      {/* Search */}
-      <div className="hidden sm:flex items-center gap-2 h-9 px-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)] w-48 cursor-pointer hover:border-[var(--color-primary)]/50 transition-colors">
-        <Search size={14} />
-        <span className="text-xs font-body">Search…</span>
-        <span className="ml-auto text-[10px] bg-[var(--color-border)] rounded px-1.5 py-0.5">⌘K</span>
-      </div>
-
-      {/* Theme toggle */}
-      <button
-        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-        className="w-9 h-9 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg)] transition-colors"
-      >
+      <button onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme" className={iconBtn}>
         {resolvedTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
       </button>
-
-      {/* Notifications */}
-      <Link
-        href="/dashboard/notifications"
-        className="relative w-9 h-9 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg)] transition-colors"
-      >
-        <Bell size={16} />
-        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[var(--color-error)] text-white text-[9px] font-bold flex items-center justify-center pulse-dot">
-          3
-        </span>
+      <Link href="/dashboard/messages" aria-label={`Messages, ${unread.messages} unread`} className={iconBtn}>
+        <MessageSquare size={16} />
+        {unread.messages > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-error)] px-1 text-[9px] font-bold text-white">{unread.messages > 99 ? '99+' : unread.messages}</span>}
       </Link>
-
-      {/* Avatar */}
-      <Link href="/dashboard/profile" className="flex items-center gap-2.5 group">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] flex items-center justify-center text-white text-xs font-bold shadow-[var(--shadow-primary)]">
-          {user ? initials(user.name) : 'U'}
-        </div>
-        <div className="hidden sm:block">
-          <p className="text-xs font-semibold text-[var(--color-text-primary)] font-body leading-none">{user?.name}</p>
-          <p className="text-[10px] text-[var(--color-text-muted)] font-body mt-0.5 capitalize">{user?.role?.toLowerCase()}</p>
-        </div>
+      <Link href="/dashboard/notifications" aria-label={`Notifications, ${unread.notifications} unread`} className={iconBtn}>
+        <Bell size={16} />
+        {unread.notifications > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--color-error)] px-1 text-[9px] font-bold text-white">{unread.notifications > 99 ? '99+' : unread.notifications}</span>}
+      </Link>
+      <Link href="/dashboard/profile" className="flex items-center gap-2.5">
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] text-xs font-bold text-white">{user ? initials(user.name) : 'U'}</span>
+        <span className="hidden sm:block">
+          <span className="block text-xs font-semibold leading-none text-[var(--color-text-primary)]">{user?.name}</span>
+          <span className="mt-0.5 block text-[10px] capitalize text-[var(--color-text-muted)]">{user?.planTier.toLowerCase()} plan</span>
+        </span>
       </Link>
     </header>
   )

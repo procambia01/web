@@ -1,322 +1,173 @@
 'use client'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams, useRouter } from 'next/navigation'
-import {
-  ArrowLeft, MapPin, Calendar, Clock, Eye, Users,
-  ArrowLeftRight, Pencil, Trash2, Pause, Play,
-  Shield, Star, TrendingUp,
-} from 'lucide-react'
+import { use, useState } from 'react'
 import Link from 'next/link'
-import { motion } from 'framer-motion'
+import { useRouter } from 'next/navigation'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowRight, Clock, MapPin, Pause, Pencil, Play, Rocket, ShieldCheck, Star, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { useState } from 'react'
-import { offerService, swapService, boostService } from '@/services'
+import type { OfferDto, SwapDto } from '@/contracts'
+import { ApiError, api, errorMessage } from '@/lib/api'
+import { useAuthStore } from '@/store/auth.store'
+import { useCurrencies } from '@/hooks/useCurrencies'
+import { formatDateTime, formatRate, timeLeft, flagEmoji } from '@/lib/format'
+import { countryName } from '@/lib/countries'
+import { gteDecimal, mulDecimal } from '@/lib/decimal'
+import { toDecimalString } from '@/lib/form'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field, TextArea, TextInput } from '@/components/ui/field'
+import { ErrorState, Notice, PageLoader } from '@/components/ui/states'
 import { OfferStatusBadge } from '@/components/ui/status-badge'
 import { UserAvatar } from '@/components/ui/user-avatar'
-import {
-  formatCurrency, formatDateTime, formatRelative,
-  formatRating, getCurrencyFlag, formatNumber,
-  trustScoreLabel, trustScoreColor,
-} from '@/lib/format'
-import { useAuthStore } from '@/store/auth.store'
-import { cn } from '@/lib/utils'
+import { TrustBadges } from '@/components/shared/TrustBadges'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { PromoteOfferDialog } from '@/components/shared/PurchaseDialog'
+import { PageHeader } from '@/components/ui/page-header'
 
-const Card = ({ title, children }: { title?: string; children: React.ReactNode }) => (
-  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)]">
-    {title && <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-4">{title}</h3>}
-    {children}
-  </div>
-)
-
-const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
-  <div className="flex items-center justify-between py-2.5 border-b border-[var(--color-divider)] last:border-0">
-    <span className="text-sm text-[var(--color-text-secondary)] font-body">{label}</span>
-    <span className="text-sm font-semibold text-[var(--color-text-primary)] font-body">{value}</span>
-  </div>
-)
-
-export default function OfferDetailPage() {
-  const { id }   = useParams<{ id: string }>()
-  const router   = useRouter()
-  const qc       = useQueryClient()
-  const { user } = useAuthStore()
-  const [isInitiatingSwap, setIsInitiatingSwap] = useState(false)
-  const [isBoosting, setIsBoosting] = useState(false)
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['offer', id],
-    queryFn:  () => offerService.getById(id),
+function RequestSwap({ offer }: { offer: OfferDto }) {
+  const router = useRouter()
+  const { money, minorUnit } = useCurrencies()
+  const [amount, setAmount] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const dec = toDecimalString(amount)
+  const wantAmount = dec ? mulDecimal(dec, offer.exchangeRate, minorUnit(offer.wantCurrency)) : null
+  const tooMuch = !!dec && !gteDecimal(offer.availableAmount, dec)
+  const tooLittle = !!dec && !gteDecimal(dec, offer.minSwapAmount)
+  const m = useMutation({
+    mutationFn: () => api.post<SwapDto>('/swaps', { offerId: offer.id, haveAmount: dec, message: message.trim() || undefined }),
+    onSuccess: (s) => { toast.success('Request sent'); router.push(`/dashboard/swaps/${s.id}`) },
+    onError: (e) => setError(errorMessage(e)),
   })
-
-  const offer = data?.data
-  if (isLoading || !offer) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
-
-  const isOwner = offer.userId === user?.id
-  const isPremium = Boolean(user?.isPremium) && (!user?.premiumExpiry || new Date(user.premiumExpiry) > new Date())
-  const isBoostActive = Boolean(offer.boostedUntil && new Date(offer.boostedUntil) > new Date())
-
-  const handleBoost = async (hours: number, optionIndex: number) => {
-    if (isBoosting) return
-    setIsBoosting(true)
-    try {
-      if (isPremium) {
-        await boostService.boostFree(offer.id, hours)
-        toast.success('Offer boosted!')
-        qc.invalidateQueries({ queryKey: ['offer', id] })
-      } else {
-        const res = await boostService.createCheckout(offer.id, optionIndex)
-        if (res.data.url) window.location.href = res.data.url
-      }
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message ?? 'Could not boost this offer.')
-    } finally {
-      setIsBoosting(false)
-    }
-  }
-
-  const handleInitiateSwap = async () => {
-    if (isInitiatingSwap) return
-    setIsInitiatingSwap(true)
-    try {
-      const res = await swapService.initiateSwap(offer.id)
-      toast.success('Swap request sent!')
-      router.push(`/dashboard/swaps/${res.data.id}`)
-    } catch (err: any) {
-      const message = err?.response?.data?.message ?? 'Could not start this swap. Please try again.'
-      toast.error(message)
-    } finally {
-      setIsInitiatingSwap(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!confirm('Delete this offer? This cannot be undone.')) return
-    try {
-      await offerService.delete(id)
-      toast.success('Offer deleted')
-      router.push('/dashboard/offers')
-    } catch { toast.error('Failed to delete') }
-  }
-
-  const handleTogglePause = async () => {
-    try {
-      if (offer.status === 'PAUSED') {
-        await offerService.resume(id)
-        toast.success('Offer resumed')
-      } else {
-        await offerService.pause(id)
-        toast.success('Offer paused')
-      }
-      qc.invalidateQueries({ queryKey: ['offer', id] })
-    } catch { toast.error('Action failed') }
-  }
-
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <button onClick={() => router.back()}
-          className="w-9 h-9 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] transition-colors">
-          <ArrowLeft size={18} />
-        </button>
-        <div className="flex-1">
-          <h1 className="font-display font-bold text-2xl text-[var(--color-text-primary)] tracking-tight">
-            {offer.haveCurrency} → {offer.wantCurrency}
-          </h1>
-          <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">
-            #{id.slice(-10).toUpperCase()} · {formatRelative(offer.createdAt)}
-          </p>
-        </div>
-        <OfferStatusBadge status={offer.status} />
-        {isOwner && (
-          <div className="flex items-center gap-2">
-            <Link href={`/dashboard/offers/${id}/edit`}
-              className="w-8 h-8 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-amber-600 hover:border-amber-200 hover:bg-amber-50 transition-colors">
-              <Pencil size={15} />
-            </Link>
-            {(offer.status === 'ACTIVE' || offer.status === 'PAUSED') && (
-              <button onClick={handleTogglePause}
-                className="w-8 h-8 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]/30 hover:bg-[var(--color-primary-light)] transition-colors">
-                {offer.status === 'PAUSED' ? <Play size={15} /> : <Pause size={15} />}
-              </button>
-            )}
-            <button onClick={handleDelete}
-              className="w-8 h-8 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors">
-              <Trash2 size={15} />
-            </button>
+    <Card>
+      <CardHeader><CardTitle>Request this swap</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <Field label={`How much ${offer.haveCurrency} do you want?`} error={tooMuch ? `Only ${money(offer.availableAmount, offer.haveCurrency)} is available` : tooLittle ? `Minimum is ${money(offer.minSwapAmount, offer.haveCurrency)}` : undefined}
+          hint={`Available: ${money(offer.availableAmount, offer.haveCurrency)}`}>
+          <TextInput inputMode="decimal" value={amount} onChange={(e) => { setAmount(e.target.value); setError('') }} placeholder={offer.minSwapAmount} />
+        </Field>
+        {wantAmount && !tooMuch && (
+          <div className="rounded-xl bg-[var(--color-bg)] p-3 text-sm">
+            You&apos;d give <strong>{money(wantAmount, offer.wantCurrency)}</strong> and receive <strong>{money(dec!, offer.haveCurrency)}</strong> at 1 {offer.haveCurrency} = {formatRate(offer.exchangeRate)} {offer.wantCurrency}.
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">The server re-checks this calculation. The amount is set aside on the offer once you request, but no money moves through CashMouver.</p>
           </div>
         )}
-      </div>
+        <Field label="Message (optional)"><TextArea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={500} placeholder="Hi! When would suit you?" /></Field>
+        {error && <Notice tone="error">{error}</Notice>}
+        <Button className="h-10 w-full" disabled={!dec || tooMuch || tooLittle || m.isPending} onClick={() => { setError(''); m.mutate() }}>{m.isPending ? 'Sending…' : 'Send request'}</Button>
+      </CardContent>
+    </Card>
+  )
+}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          {/* Exchange hero */}
+export default function OfferDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params)
+  const router = useRouter()
+  const qc = useQueryClient()
+  const me = useAuthStore((s) => s.user)
+  const { money } = useCurrencies()
+  const [promo, setPromo] = useState<null | 'BOOST' | 'FEATURED'>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const q = useQuery({ queryKey: ['offer', id], queryFn: () => api.get<OfferDto>(`/offers/${id}`) })
+  const toggle = useMutation({
+    mutationFn: (pause: boolean) => api.post<OfferDto>(`/offers/${id}/${pause ? 'pause' : 'resume'}`),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['offer', id] }); void qc.invalidateQueries({ queryKey: ['offers'] }) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+
+  if (q.isLoading) return <PageLoader />
+  if (q.error || !q.data) {
+    const notFound = q.error instanceof ApiError && q.error.status === 404
+    return <ErrorState error={notFound ? new Error('This offer is no longer available.') : q.error} onRetry={notFound ? undefined : () => q.refetch()} />
+  }
+  const o = q.data
+  const mine = !!o.mine || o.owner.id === me?.id
+  const live = o.status === 'ACTIVE'
+
+  return (
+    <div>
+      <PageHeader
+        title={`${o.haveCurrency} → ${o.wantCurrency}`}
+        description={`Posted by ${o.owner.name}`}
+        actions={mine ? (
+          <>
+            <Link href={`/dashboard/offers/${o.id}/edit`} className={buttonVariants({ variant: 'outline' })}><Pencil size={14} /> Edit</Link>
+            {(o.status === 'ACTIVE' || o.status === 'PAUSED') && (
+              <Button variant="outline" disabled={toggle.isPending} onClick={() => toggle.mutate(o.status === 'ACTIVE')}>{o.status === 'ACTIVE' ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button>
+            )}
+            {(o.status === 'ACTIVE' || o.status === 'PAUSED') && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Trash2 size={14} /> Cancel</Button>}
+          </>
+        ) : undefined}
+      />
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
           <Card>
-            <div className="grid grid-cols-3 items-center gap-4 py-4">
-              <div className="text-center">
-                <p className="text-5xl mb-3">{getCurrencyFlag(offer.haveCurrency)}</p>
-                <p className="font-display font-bold text-3xl text-[var(--color-text-primary)]">
-                  {formatCurrency(offer.haveAmount, offer.haveCurrency)}
-                </p>
-                <p className="text-sm text-[var(--color-text-muted)] font-body mt-1">Offering</p>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3 font-display text-2xl font-bold"><span>{money(o.availableAmount, o.haveCurrency)}</span><ArrowRight className="text-[var(--color-text-muted)]" /><span className="text-[var(--color-primary)]">{money(o.availableWantAmount, o.wantCurrency)}</span></div>
+                <div className="flex items-center gap-2">{o.isFeatured && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">Featured</span>}{o.isBoosted && <span className="rounded-full bg-[var(--color-primary-light)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--color-primary)]">Boosted</span>}{mine && <OfferStatusBadge status={o.status} />}</div>
               </div>
-              <div className="flex flex-col items-center gap-2">
-                <div className="w-12 h-12 rounded-full bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-center">
-                  <ArrowLeftRight size={20} className="text-[var(--color-text-secondary)]" />
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-[var(--color-text-muted)] font-body">Rate</p>
-                  <p className="text-sm font-bold text-[var(--color-text-primary)] font-body mt-0.5">
-                    {offer.exchangeRate.toFixed(4)}
-                  </p>
-                </div>
-              </div>
-              <div className="text-center">
-                <p className="text-5xl mb-3">{getCurrencyFlag(offer.wantCurrency)}</p>
-                <p className="font-display font-bold text-3xl text-[var(--color-text-primary)]">
-                  {formatCurrency(offer.wantAmount, offer.wantCurrency)}
-                </p>
-                <p className="text-sm text-[var(--color-text-muted)] font-body mt-1">Wanting</p>
-              </div>
-            </div>
-
-            {/* Engagement stats */}
-            <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-[var(--color-divider)]">
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)]">
-                <Eye size={18} className="text-[var(--color-text-muted)]" />
-                <div>
-                  <p className="font-display font-bold text-lg text-[var(--color-text-primary)]">
-                    {formatNumber(offer.viewCount, 0)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body">Views</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)]">
-                <Users size={18} className="text-[var(--color-text-muted)]" />
-                <div>
-                  <p className="font-display font-bold text-lg text-[var(--color-text-primary)]">
-                    {formatNumber(offer.matchCount, 0)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body">Matches</p>
-                </div>
-              </div>
-            </div>
+              <dl className="grid gap-4 text-sm sm:grid-cols-2">
+                <div><dt className="text-[var(--color-text-muted)]">Rate</dt><dd className="font-semibold">1 {o.haveCurrency} = {formatRate(o.exchangeRate)} {o.wantCurrency}</dd></div>
+                <div><dt className="text-[var(--color-text-muted)]">Original size</dt><dd className="font-semibold">{money(o.haveAmount, o.haveCurrency)}</dd></div>
+                <div><dt className="text-[var(--color-text-muted)]">Currently reserved by swaps</dt><dd className="font-semibold">{money(o.reservedAmount, o.haveCurrency)}</dd></div>
+                <div><dt className="text-[var(--color-text-muted)]">Smallest swap</dt><dd className="font-semibold">{money(o.minSwapAmount, o.haveCurrency)}</dd></div>
+                <div className="flex items-start gap-1.5"><MapPin size={14} className="mt-0.5 text-[var(--color-text-muted)]" /><div><dt className="text-[var(--color-text-muted)]">Area</dt><dd className="font-semibold">{o.area.label ? `${o.area.label}, ` : ''}{o.area.city}, {flagEmoji(o.area.country)} {countryName(o.area.country)}</dd><dd className="text-xs text-[var(--color-text-muted)]">Within ~{o.area.radiusKm} km · exact spot agreed privately</dd></div></div>
+                <div className="flex items-start gap-1.5"><Clock size={14} className="mt-0.5 text-[var(--color-text-muted)]" /><div><dt className="text-[var(--color-text-muted)]">Available</dt><dd className="font-semibold">{formatDateTime(o.availableFrom)} → {formatDateTime(o.availableUntil)}</dd><dd className="text-xs text-[var(--color-text-muted)]">{timeLeft(o.availableUntil)} left</dd></div></div>
+              </dl>
+              {o.notes && <p className="rounded-xl bg-[var(--color-bg)] p-3 text-sm">{o.notes}</p>}
+              {(o.requiresVerifiedUsers || o.minTrustScore > 0) && <p className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]"><ShieldCheck size={13} /> Requires {o.requiresVerifiedUsers ? 'identity verification' : ''}{o.requiresVerifiedUsers && o.minTrustScore > 0 ? ' and ' : ''}{o.minTrustScore > 0 ? `a trust score of ${o.minTrustScore}+` : ''}</p>}
+            </CardContent>
           </Card>
 
-          {/* Details */}
-          <Card title="Offer Details">
-            <Row label="Location" value={
-              <span className="flex items-center gap-1">
-                <MapPin size={13} className="text-[var(--color-text-muted)]" />
-                {[offer.city, offer.state, offer.country].filter(Boolean).join(', ')}
-              </span>
-            } />
-            <Row label="Meeting radius" value={`${offer.radius}km`} />
-            <Row label="Available from" value={formatDateTime(offer.availableFrom)} />
-            <Row label="Available until" value={formatDateTime(offer.availableUntil)} />
-            <Row label="Flexible timing" value={offer.isFlexible ? '✅ Yes' : '❌ No'} />
-            <Row label="Visibility" value={offer.visibility.replace('_', ' ')} />
-            <Row label="Requires verified users" value={offer.requiresVerifiedUsers ? '✅ Yes' : '❌ No'} />
-            {offer.minTrustScore > 0 && <Row label="Min trust score" value={offer.minTrustScore} />}
-            {offer.expiresAt && <Row label="Expires" value={formatRelative(offer.expiresAt)} />}
-          </Card>
-
-          {/* Notes */}
-          {offer.notes && (
-            <Card title="Notes">
-              <p className="text-sm text-[var(--color-text-secondary)] font-body leading-relaxed">{offer.notes}</p>
+          {mine && (
+            <Card>
+              <CardHeader><CardTitle>Promote this offer</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-[var(--color-border)] p-4">
+                    <p className="flex items-center gap-2 font-semibold"><Rocket size={16} className="text-[var(--color-primary)]" /> Boost</p>
+                    <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Rank higher in search results.{o.boostedUntil && ` Active until ${formatDateTime(o.boostedUntil)}.`}</p>
+                    <Button className="mt-3" variant="outline" disabled={!live} onClick={() => setPromo('BOOST')}>{o.isBoosted ? 'Extend boost' : 'Boost offer'}</Button>
+                  </div>
+                  <div className="rounded-xl border border-[var(--color-border)] p-4">
+                    <p className="flex items-center gap-2 font-semibold"><Star size={16} className="text-amber-500" /> Featured</p>
+                    <p className="mt-1 text-sm text-[var(--color-text-secondary)]">Show in premium placements.{o.featuredUntil && ` Active until ${formatDateTime(o.featuredUntil)}.`}</p>
+                    <Button className="mt-3" variant="outline" disabled={!live} onClick={() => setPromo('FEATURED')}>{o.isFeatured ? 'Extend featured' : 'Feature offer'}</Button>
+                  </div>
+                </div>
+                {!live && <p className="text-xs text-[var(--color-text-muted)]">Only active offers can be promoted.</p>}
+                <p className="text-xs text-[var(--color-text-muted)]">Payment is confirmed by our server after Stripe tells us it succeeded; the badge appears once that happens. Views: {o.viewCount}.</p>
+              </CardContent>
             </Card>
           )}
         </div>
 
-        {/* Right: trader info */}
-        <div className="space-y-5">
-          {isOwner && (
-            <Card title="Boost this offer">
-              <p className="text-xs text-[var(--color-text-secondary)] font-body mb-3">
-                {isBoostActive
-                  ? `Boosted until ${formatDateTime(offer.boostedUntil!)}`
-                  : isPremium
-                  ? 'Feature this offer at the top of search results — free with Premium.'
-                  : 'Feature this offer at the top of search results.'}
-              </p>
-              {!isBoostActive && (
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { hours: 24, optionIndex: 0, label: '24h', price: '$1.99' },
-                    { hours: 72, optionIndex: 1, label: '3d', price: '$4.99' },
-                    { hours: 168, optionIndex: 2, label: '7d', price: '$9.99' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.hours}
-                      disabled={isBoosting}
-                      onClick={() => handleBoost(opt.hours, opt.optionIndex)}
-                      className="flex flex-col items-center py-2.5 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      <span className="text-sm font-semibold text-[var(--color-text-primary)] font-body">{opt.label}</span>
-                      <span className="text-[10px] text-[var(--color-text-muted)] font-body">
-                        {isPremium ? 'Free' : opt.price}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
-
-          <Card title="Trader">
-            <div className="flex flex-col items-center text-center gap-3">
-              <UserAvatar name={offer.user.name} image={offer.user.image} size="xl" verified={offer.user.idVerified} />
-              <div>
-                <p className="font-display font-bold text-lg text-[var(--color-text-primary)]">{offer.user.name}</p>
-                {offer.user.idVerified && (
-                  <span className="inline-flex items-center gap-1 text-xs text-[var(--color-primary)] bg-[var(--color-primary-light)] px-2 py-0.5 rounded-full font-body font-semibold mt-1">
-                    <Shield size={11} /> Verified
-                  </span>
-                )}
+        <div className="space-y-6">
+          <Card>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-3">
+                <UserAvatar name={o.owner.name} image={o.owner.image} size="lg" verified={o.owner.verified} />
+                <div><Link href={`/dashboard/members/${o.owner.id}`} className="font-semibold hover:underline">{o.owner.name}</Link><p className="text-xs text-[var(--color-text-muted)]">{[o.owner.city, o.owner.country && countryName(o.owner.country)].filter(Boolean).join(', ')}</p></div>
               </div>
-              <div className="w-full space-y-2 pt-2 border-t border-[var(--color-divider)]">
-                <div className="flex items-center justify-between text-sm font-body">
-                  <span className="text-[var(--color-text-secondary)] flex items-center gap-1"><Star size={13} className="text-amber-400" /> Rating</span>
-                  <span className="font-semibold text-[var(--color-text-primary)]">{formatRating(offer.user.rating)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm font-body">
-                  <span className="text-[var(--color-text-secondary)] flex items-center gap-1"><ArrowLeftRight size={13} /> Swaps</span>
-                  <span className="font-semibold text-[var(--color-text-primary)]">{offer.user.totalSwaps}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm font-body">
-                  <span className="text-[var(--color-text-secondary)] flex items-center gap-1"><TrendingUp size={13} /> Trust</span>
-                  <span className={cn('font-semibold', trustScoreColor(offer.user.trustScore))}>
-                    {trustScoreLabel(offer.user.trustScore)}
-                  </span>
-                </div>
-              </div>
-            </div>
+              <TrustBadges user={o.owner} />
+              <dl className="grid grid-cols-3 gap-2 pt-1 text-center text-xs">
+                <div className="rounded-lg bg-[var(--color-bg)] p-2"><dd className="font-display text-base font-bold">{o.owner.trustScore}</dd><dt className="text-[var(--color-text-muted)]">Trust</dt></div>
+                <div className="rounded-lg bg-[var(--color-bg)] p-2"><dd className="font-display text-base font-bold">{Math.round(o.owner.completionRate * 100)}%</dd><dt className="text-[var(--color-text-muted)]">Completed</dt></div>
+                <div className="rounded-lg bg-[var(--color-bg)] p-2"><dd className="font-display text-base font-bold">{o.owner.successfulSwaps}</dd><dt className="text-[var(--color-text-muted)]">Swaps</dt></div>
+              </dl>
+            </CardContent>
           </Card>
-
-          {/* Initiate swap CTA */}
-          {!isOwner && offer.status === 'ACTIVE' && (
-            <button
-              onClick={handleInitiateSwap}
-              disabled={isInitiatingSwap}
-              className="w-full h-11 rounded-xl bg-[var(--color-primary)] text-white font-semibold font-body text-sm hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isInitiatingSwap ? (
-                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <ArrowLeftRight size={16} />
-                  Swap with {offer.user.name.split(' ')[0]}
-                </>
-              )}
-            </button>
-          )}
+          {!mine && live && <RequestSwap offer={o} />}
+          {!mine && !live && <Notice tone="warning">This offer is {o.status.toLowerCase()} and can&apos;t be requested.</Notice>}
         </div>
       </div>
-    </motion.div>
+
+      {promo && <PromoteOfferDialog offerId={o.id} kind={promo} open onOpenChange={(v) => !v && setPromo(null)} />}
+      <ConfirmDialog open={cancelOpen} onOpenChange={setCancelOpen} destructive title="Cancel this offer?" description="Pending requests on it will be declined. Agreed swaps are not affected." confirmLabel="Cancel offer"
+        onConfirm={async () => { await api.del(`/offers/${id}`); void qc.invalidateQueries({ queryKey: ['offers'] }); toast.success('Offer cancelled'); router.push('/dashboard/offers') }} />
+    </div>
   )
 }

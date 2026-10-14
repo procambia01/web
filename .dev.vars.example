@@ -1,0 +1,4 @@
+# Used by `npm run pages:preview` (local Workers runtime)
+NEXT_PUBLIC_API_URL=http://localhost:8080/api/v1
+NEXT_PUBLIC_SOCKET_URL=http://localhost:8080
+API_URL=http://localhost:8080/api/v1

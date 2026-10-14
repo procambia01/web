@@ -25,3 +25,5 @@ coverage/
 
 # Vercel (unused here, but harmless to ignore if it ever appears)
 .vercel
+.dev.vars
+.env.local

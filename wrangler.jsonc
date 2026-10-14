@@ -1,14 +1,21 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cashmova-web",
+  "name": "cashmouver-web",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-01-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
-  "observability": {
-    "enabled": true
+  "observability": { "enabled": true },
+  // Runtime (server-side) variables for the Worker. NEXT_PUBLIC_* values are
+  // ALSO inlined at build time from .env.production — keep both in sync.
+  // Replace api.cashmouver.com with your real Cloud Run / custom API domain.
+  "vars": {
+    "NEXT_PUBLIC_API_URL": "https://api.cashmouver.com/api/v1",
+    "NEXT_PUBLIC_SOCKET_URL": "https://api.cashmouver.com",
+    "NEXT_PUBLIC_APP_URL": "https://cashmouver.com",
+    "API_URL": "https://api.cashmouver.com/api/v1"
   }
 }

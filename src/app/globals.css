@@ -53,6 +53,23 @@
   --color-sidebar-text:   #94A3B8;
   --color-sidebar-active: #1A6BFF;
 
+  /* Aliases consumed by the shared ui/* primitives */
+  --color-foreground:           var(--color-text-primary);
+  --color-background:           var(--color-surface);
+  --color-muted:                var(--color-bg);
+  --color-muted-foreground:     var(--color-text-secondary);
+  --color-input:                var(--color-border);
+  --color-ring:                 var(--color-primary);
+  --color-card:                 var(--color-surface);
+  --color-card-foreground:      var(--color-text-primary);
+  --color-popover:              var(--color-surface);
+  --color-popover-foreground:   var(--color-text-primary);
+  --color-primary-foreground:   #FFFFFF;
+  --color-secondary:            var(--color-divider);
+  --color-secondary-foreground: var(--color-text-primary);
+  --color-destructive:          var(--color-error);
+  --color-accent-foreground:    var(--color-text-primary);
+
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(15,23,41,.05);
   --shadow-sm: 0 2px 8px rgba(15,23,41,.07);

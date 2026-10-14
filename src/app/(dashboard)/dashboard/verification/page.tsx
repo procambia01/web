@@ -1,184 +1,133 @@
 'use client'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { Shield, CreditCard, Upload, Camera, CheckCircle2 } from 'lucide-react'
-import toast from 'react-hot-toast'
 import { useState } from 'react'
-import { userService, verificationService } from '@/services'
-import { PageHeader } from '@/components/ui/page-header'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { BadgeCheck, Clock, FileCheck2, ShieldAlert, XCircle } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { verificationSubmitSchema, type ServiceProductDto, type VerificationCaseDto } from '@/contracts'
+import { api, errorMessage } from '@/lib/api'
+import { startCheckout } from '@/lib/checkout'
+import { countryOptions, countryName } from '@/lib/countries'
+import { enumLabel, formatDate } from '@/lib/format'
+import { validate, type FieldErrors } from '@/lib/form'
 import { useAuthStore } from '@/store/auth.store'
+import { useCurrencies } from '@/hooks/useCurrencies'
+import { useProducts } from '@/hooks/usePlan'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Field, NativeSelect, TextInput } from '@/components/ui/field'
+import { PageHeader } from '@/components/ui/page-header'
+import { ErrorState, Notice, Skeleton } from '@/components/ui/states'
+import { StatusBadge } from '@/components/ui/status-badge'
 
-const DOC_TYPES = [
-  { value: 'passport', label: 'Passport' },
-  { value: 'drivers_license', label: "Driver's License" },
-  { value: 'national_id', label: 'National ID' },
-]
+const MAX_BYTES = 8 * 1024 * 1024
+const VARIANT = { SUBMITTED: 'info', UNDER_REVIEW: 'info', VERIFIED: 'success', REJECTED: 'error', EXPIRED: 'neutral' } as const
 
-export default function VerificationPage() {
-  const router = useRouter()
+function FileSlot({ label, hint, file, onFile, error }: { label: string; hint: string; file: File | null; onFile: (f: File | null) => void; error?: string }) {
+  return (
+    <Field label={label} hint={hint} error={error}>
+      <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => onFile(e.target.files?.[0] ?? null)} aria-label={label}
+        className="block w-full rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--color-primary-light)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--color-primary)]" />
+      {file && <p className="text-xs text-[var(--color-text-muted)]">{file.name} · {(file.size / 1024).toFixed(0)} KB</p>}
+    </Field>
+  )
+}
+
+function SubmitForm({ enhanced }: { enhanced?: ServiceProductDto }) {
   const qc = useQueryClient()
-  const { user } = useAuthStore()
+  const countries = countryOptions()
+  const [f, setF] = useState({ type: 'INDIVIDUAL', tier: 'BASIC', documentType: 'PASSPORT', documentCountry: '', businessName: '', registrationNumber: '' })
+  const [files, setFiles] = useState<Record<string, File | null>>({})
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [busy, setBusy] = useState(false)
+  const business = f.type === 'BUSINESS'
+  const slots = business ? [['BUSINESS_REGISTRATION', 'Business registration document', 'Certificate of incorporation or equivalent'], ['PROOF_OF_ADDRESS', 'Proof of address (optional)', 'Utility bill or bank statement under 3 months old']] : [['ID_FRONT', 'ID document (front)', 'Passport photo page, or front of ID card / licence'], ['ID_BACK', 'ID document (back, if it has one)', 'Back of ID card or licence'], ['SELFIE', 'Selfie holding your document', 'Your face and the document must both be clearly visible']]
+  const required = business ? ['BUSINESS_REGISTRATION'] : ['ID_FRONT', 'SELFIE']
 
-  const { data } = useQuery({
-    queryKey: ['profile'],
-    queryFn: () => userService.getProfile(),
-  })
-  const profile = data?.data ?? user
-
-  const [isStartingCheckout, setIsStartingCheckout] = useState(false)
-  const [docType, setDocType] = useState('national_id')
-  const [docFile, setDocFile] = useState<File | null>(null)
-  const [selfieFile, setSelfieFile] = useState<File | null>(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-
-  const feePaid = Boolean(profile?.verificationFeePaid)
-
-  const handlePayFee = async () => {
-    setIsStartingCheckout(true)
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const { data, errors: errs } = validate(verificationSubmitSchema, { ...f, businessName: f.businessName || undefined, registrationNumber: f.registrationNumber || undefined })
+    for (const k of required) if (!files[k]) errs[k] = 'This document is required'
+    for (const [k, file] of Object.entries(files)) if (file && file.size > MAX_BYTES) errs[k] = 'File is larger than 8 MB'
+    if (business && !f.businessName.trim()) errs.businessName = 'Enter the registered business name'
+    setErrors(errs)
+    if (!data || Object.keys(errs).length) return
+    setBusy(true)
     try {
-      const res = await verificationService.createCheckout()
-      if (res.data.url) window.location.href = res.data.url
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message ?? 'Could not start checkout')
-    } finally {
-      setIsStartingCheckout(false)
-    }
-  }
-
-  const handleSubmit = async () => {
-    if (!docFile || !selfieFile || !profile) return
-    setIsSubmitting(true)
-    try {
-      const docForm = new FormData()
-      docForm.append('documentType', docType)
-      docForm.append('documentNumber', '')
-      docForm.append('country', profile.country ?? '')
-      docForm.append('idDocument', docFile)
-      await verificationService.submitDocument(profile.id, docForm)
-
-      const selfieForm = new FormData()
-      selfieForm.append('selfie', selfieFile)
-      await verificationService.submitSelfie(profile.id, selfieForm)
-
-      qc.invalidateQueries({ queryKey: ['profile'] })
-      setSubmitted(true)
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message ?? 'Submission failed. Please try again.')
-    } finally {
-      setIsSubmitting(false)
-    }
+      const form = new FormData()
+      for (const [k, v] of Object.entries(data)) if (v !== undefined) form.append(k, String(v))
+      for (const [kind, file] of Object.entries(files)) if (file) { form.append('documents', file); form.append('kinds', kind) }
+      const created = await api.upload<VerificationCaseDto>('/verification', form)
+      toast.success('Submitted for review')
+      setFiles({})
+      void qc.invalidateQueries({ queryKey: ['verification'] })
+      if (created.needsPayment && enhanced) await startCheckout('verification', { productCode: enhanced.code, caseId: created.id })
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally { setBusy(false) }
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-xl mx-auto space-y-5">
-      <PageHeader title="Identity Verification" description="Build trust, unlock higher swap limits" />
+    <form onSubmit={submit} className="space-y-5" noValidate>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Verification for"><NativeSelect value={f.type} onChange={(e) => setF((p) => ({ ...p, type: e.target.value }))}><option value="INDIVIDUAL">Me (individual)</option><option value="BUSINESS">My business</option></NativeSelect></Field>
+        <Field label="Level"><NativeSelect value={f.tier} onChange={(e) => setF((p) => ({ ...p, tier: e.target.value }))}><option value="BASIC">Standard (free)</option>{enhanced && <option value="ENHANCED">Enhanced — priority review (paid)</option>}</NativeSelect></Field>
+        <Field label="Document type" error={errors.documentType}><NativeSelect value={f.documentType} onChange={(e) => setF((p) => ({ ...p, documentType: e.target.value }))}>{['PASSPORT', 'NATIONAL_ID', 'DRIVING_LICENCE', 'RESIDENCE_PERMIT'].map((d) => <option key={d} value={d}>{enumLabel(d)}</option>)}</NativeSelect></Field>
+        <Field label="Issuing country" error={errors.documentCountry}><NativeSelect value={f.documentCountry} onChange={(e) => setF((p) => ({ ...p, documentCountry: e.target.value }))} invalid={!!errors.documentCountry}><option value="">Select…</option>{countries.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</NativeSelect></Field>
+        {business && <><Field label="Registered business name" error={errors.businessName}><TextInput value={f.businessName} onChange={(e) => setF((p) => ({ ...p, businessName: e.target.value }))} /></Field><Field label="Registration number (optional)"><TextInput value={f.registrationNumber} onChange={(e) => setF((p) => ({ ...p, registrationNumber: e.target.value }))} /></Field></>}
+      </div>
+      {slots.map(([k, l, h]) => <FileSlot key={k} label={l} hint={h} file={files[k] ?? null} onFile={(file) => setFiles((p) => ({ ...p, [k]: file }))} error={errors[k]} />)}
+      <Notice tone="info">Documents are encrypted in private storage, checked by authorised reviewers through short-lived links, and deleted on our retention schedule. We never show them to other members.</Notice>
+      <Button type="submit" size="lg" className="h-10 px-6" disabled={busy}>{busy ? 'Uploading…' : f.tier === 'ENHANCED' ? 'Submit and continue to payment' : 'Submit for review'}</Button>
+    </form>
+  )
+}
 
-      {!feePaid ? (
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-[var(--shadow-sm)] text-center">
-          <div className="w-16 h-16 rounded-2xl bg-[var(--color-primary-light)] flex items-center justify-center mx-auto mb-4">
-            <Shield size={30} className="text-[var(--color-primary)]" />
-          </div>
-          <h2 className="font-display font-bold text-xl text-[var(--color-text-primary)]">Get Verified</h2>
-          <p className="text-sm text-[var(--color-text-secondary)] font-body mt-2 leading-relaxed">
-            A one-time $2.99 fee covers document review and unlocks the Verified Trader badge —
-            higher trust, higher swap limits, and access to verified-only offers.
-          </p>
-          <button
-            onClick={handlePayFee}
-            disabled={isStartingCheckout}
-            className="mt-6 inline-flex items-center gap-2 h-11 px-6 rounded-xl bg-[var(--color-primary)] text-white font-semibold font-body text-sm hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] disabled:opacity-60"
-          >
-            <CreditCard size={16} />
-            {isStartingCheckout ? 'Loading…' : 'Pay & Continue'}
-          </button>
-        </div>
-      ) : submitted ? (
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-[var(--shadow-sm)] text-center">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 size={30} className="text-emerald-500" />
-          </div>
-          <h2 className="font-display font-bold text-xl text-[var(--color-text-primary)]">Documents Submitted!</h2>
-          <p className="text-sm text-[var(--color-text-secondary)] font-body mt-2">
-            We&apos;re reviewing your identity documents. This usually takes 24–48 hours.
-          </p>
-          <button
-            onClick={() => router.push('/dashboard/profile')}
-            className="mt-6 h-10 px-5 rounded-xl border border-[var(--color-border)] text-sm font-semibold font-body text-[var(--color-text-primary)] hover:bg-[var(--color-bg)] transition-colors"
-          >
-            Back to Profile
-          </button>
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)] space-y-5">
-          <div>
-            <label className="text-sm font-semibold font-body text-[var(--color-text-primary)] mb-2 block">
-              Document Type
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {DOC_TYPES.map((d) => (
-                <button
-                  key={d.value}
-                  onClick={() => setDocType(d.value)}
-                  className={`h-10 rounded-xl border text-xs font-semibold font-body transition-colors ${
-                    docType === d.value
-                      ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)]'
-                  }`}
-                >
-                  {d.label}
-                </button>
+export default function VerificationPage() {
+  const me = useAuthStore((s) => s.user)!
+  const { money } = useCurrencies()
+  const products = useProducts('VERIFICATION')
+  const cases = useQuery({ queryKey: ['verification'], queryFn: () => api.get<VerificationCaseDto[]>('/verification') })
+  const [payingId, setPayingId] = useState<string | null>(null)
+  const enhanced = products.data?.[0]
+  const open = cases.data?.find((c) => ['SUBMITTED', 'UNDER_REVIEW'].includes(c.status))
+
+  async function pay(c: VerificationCaseDto) {
+    if (!enhanced) return
+    setPayingId(c.id)
+    try { await startCheckout('verification', { productCode: enhanced.code, caseId: c.id }) } catch (e) { toast.error(errorMessage(e)); setPayingId(null) }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <PageHeader title="Verification" description="Verified members get higher limits and more trust. You can't verify yourself — a reviewer must approve your documents." />
+      <Card className="mb-6">
+        <CardContent className="flex flex-wrap items-center gap-4">
+          {me.verificationStatus === 'VERIFIED' ? <BadgeCheck className="text-[var(--color-primary)]" size={36} /> : me.verificationStatus === 'PENDING' ? <Clock className="text-amber-500" size={36} /> : me.verificationStatus === 'REJECTED' ? <XCircle className="text-red-500" size={36} /> : <ShieldAlert className="text-[var(--color-text-muted)]" size={36} />}
+          <div className="flex-1"><p className="font-display text-lg font-bold">{enumLabel(me.verificationStatus)}</p><p className="text-sm text-[var(--color-text-secondary)]">Level: {enumLabel(me.verificationTier)}{me.businessVerified ? ' · Business verified' : ''}</p></div>
+        </CardContent>
+      </Card>
+
+      {cases.isLoading ? <Skeleton className="h-24" /> : cases.error ? <ErrorState error={cases.error} onRetry={() => cases.refetch()} /> : (cases.data?.length ?? 0) > 0 && (
+        <Card className="mb-6">
+          <CardHeader><CardTitle>Your submissions</CardTitle></CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-[var(--color-divider)]">
+              {cases.data!.map((c) => (
+                <li key={c.id} className="space-y-1 py-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="flex items-center gap-2 font-semibold"><FileCheck2 size={14} /> {enumLabel(c.type)} · {enumLabel(c.tier)} · {enumLabel(c.documentType)} ({countryName(c.documentCountry)})</span><StatusBadge label={c.status.replace('_', ' ')} variant={VARIANT[c.status]} /></div>
+                  <p className="text-xs text-[var(--color-text-muted)]">Submitted {formatDate(c.submittedAt)}{c.reviewedAt && ` · reviewed ${formatDate(c.reviewedAt)}`}{c.expiresAt && c.status === 'VERIFIED' && ` · valid until ${formatDate(c.expiresAt)}`}</p>
+                  {c.rejectionReason && <Notice tone="error">Declined: {c.rejectionReason}</Notice>}
+                  {c.needsPayment && enhanced && <div className="flex items-center gap-3 pt-1"><p className="text-xs text-[var(--color-text-secondary)]">Enhanced review starts once the {money(enhanced.amount, enhanced.currency)} fee is paid.</p><Button size="sm" disabled={payingId === c.id} onClick={() => pay(c)}>Pay fee</Button></div>}
+                </li>
               ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-sm font-semibold font-body text-[var(--color-text-primary)] mb-2 block">
-              Upload Document
-            </label>
-            <label className="flex flex-col items-center justify-center h-32 rounded-xl border-2 border-dashed border-[var(--color-border)] cursor-pointer hover:border-[var(--color-primary)] transition-colors">
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                className="hidden"
-                onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
-              />
-              <Upload size={22} className="text-[var(--color-text-muted)]" />
-              <span className="text-xs text-[var(--color-text-secondary)] font-body mt-2">
-                {docFile ? docFile.name : 'Click to upload'}
-              </span>
-            </label>
-          </div>
-
-          <div>
-            <label className="text-sm font-semibold font-body text-[var(--color-text-primary)] mb-2 block">
-              Selfie
-            </label>
-            <label className="flex flex-col items-center justify-center h-32 rounded-xl border-2 border-dashed border-[var(--color-border)] cursor-pointer hover:border-[var(--color-primary)] transition-colors">
-              <input
-                type="file"
-                accept="image/*"
-                capture="user"
-                className="hidden"
-                onChange={(e) => setSelfieFile(e.target.files?.[0] ?? null)}
-              />
-              <Camera size={22} className="text-[var(--color-text-muted)]" />
-              <span className="text-xs text-[var(--color-text-secondary)] font-body mt-2">
-                {selfieFile ? selfieFile.name : 'Click to upload'}
-              </span>
-            </label>
-          </div>
-
-          <button
-            onClick={handleSubmit}
-            disabled={!docFile || !selfieFile || isSubmitting}
-            className="w-full h-11 rounded-xl bg-[var(--color-primary)] text-white font-semibold font-body text-sm hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Submitting…' : 'Submit for Verification'}
-          </button>
-        </div>
+            </ul>
+          </CardContent>
+        </Card>
       )}
-    </motion.div>
+
+      {open ? <Notice tone="info">Your submission is being reviewed. We&apos;ll notify you as soon as there&apos;s a decision.</Notice> : me.verificationStatus === 'VERIFIED' && me.verificationTier === 'ENHANCED' ? null : (
+        <Card><CardHeader><CardTitle>{me.verificationStatus === 'VERIFIED' ? 'Upgrade or verify a business' : 'Verify your identity'}</CardTitle></CardHeader><CardContent><SubmitForm enhanced={enhanced} /></CardContent></Card>
+      )}
+    </div>
   )
 }

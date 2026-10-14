@@ -17,6 +17,6 @@ export const useUIStore = create<UIState>()(
       toggleSidebar:    () => set(s => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setMobileMenu:    (open) => set({ mobileMenuOpen: open }),
     }),
-    { name: 'cashmova-ui', partialize: s => ({ sidebarCollapsed: s.sidebarCollapsed }) }
+    { name: 'cashmouver-ui', partialize: s => ({ sidebarCollapsed: s.sidebarCollapsed }) }
   )
 )

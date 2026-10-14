@@ -1,288 +1,68 @@
-"use client";
-import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import {
-  Copy,
-  Share2,
-  Gift,
-  Check,
-  Users,
-  CheckCircle2,
-  Clock,
-} from "lucide-react";
-import { useState } from "react";
-import toast from "react-hot-toast";
-import { referralService } from "@/services";
-import { PageHeader } from "@/components/ui/page-header";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { UserAvatar } from "@/components/ui/user-avatar";
-import { formatRelative } from "@/lib/format";
-import { cn } from "@/lib/utils";
-import type { Referral } from "@/types";
-
-const STATUS_VARIANT: Record<
-  string,
-  "success" | "warning" | "neutral" | "error"
-> = {
-  REWARDED: "success",
-  COMPLETED: "success",
-  PENDING: "warning",
-  EXPIRED: "neutral",
-};
+'use client'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Copy, Gift, Link2, MousePointerClick, UserCheck, UserPlus } from 'lucide-react'
+import toast from 'react-hot-toast'
+import type { ReferralItemDto, ReferralSummaryDto } from '@/contracts'
+import { api } from '@/lib/api'
+import { useCurrencies } from '@/hooks/useCurrencies'
+import { enumLabel, formatDate } from '@/lib/format'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
+import { StatCard } from '@/components/ui/stat-card'
+import { EmptyState, ErrorState, Notice, Skeleton } from '@/components/ui/states'
+import { Pager } from '@/components/shared/Pager'
 
 export default function ReferralsPage() {
-  const [copied, setCopied] = useState(false);
+  const { money } = useCurrencies()
+  const [page, setPage] = useState(1)
+  const summary = useQuery({ queryKey: ['referrals'], queryFn: () => api.get<ReferralSummaryDto>('/referrals') })
+  const list = useQuery({ queryKey: ['referrals', 'list', page], queryFn: () => api.page<ReferralItemDto>('/referrals/list', { page, perPage: 10 }) })
 
-  const { data: codeData } = useQuery({
-    queryKey: ["referral-code"],
-    queryFn: referralService.getMyCode,
-  });
-
-  const { data: referralsData, isLoading } = useQuery({
-    queryKey: ["my-referrals"],
-    queryFn: referralService.getMyReferrals,
-  });
-
-  // Backend returns data: { code: '...' } — extract the code string
-  const code = codeData?.data?.code ?? "";
-  const referrals = (referralsData?.data ?? []) as Referral[];
-  const completed = referrals.filter(
-    (r) => r.status === "COMPLETED" || r.status === "REWARDED",
-  ).length;
-  const pending = referrals.filter((r) => r.status === "PENDING").length;
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    toast.success("Code copied!");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleShare = async () => {
-    const text = `Join Cashmova — peer-to-peer currency exchange! Use my code ${code} to get started. https://cashmova.com`;
-    if (navigator.share) {
-      await navigator.share({ title: "Join Cashmova", text });
-    } else {
-      await navigator.clipboard.writeText(text);
-      toast.success("Share text copied!");
-    }
-  };
-
-  const stagger = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
+  async function copy(text: string) {
+    try { await navigator.clipboard.writeText(text); toast.success('Copied') } catch { toast.error('Copy failed — select the link and copy it manually') }
+  }
+  if (summary.isLoading) return <Skeleton className="h-64" />
+  if (summary.error || !summary.data) return <ErrorState error={summary.error} onRetry={() => summary.refetch()} />
+  const s = summary.data
 
   return (
-    <motion.div
-      initial="hidden"
-      animate="show"
-      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.07 } } }}
-      className="max-w-3xl mx-auto space-y-6"
-    >
-      <motion.div variants={stagger}>
-        <PageHeader
-          title="Referrals"
-          description="Invite friends and earn rewards together"
-        />
-      </motion.div>
+    <div className="max-w-4xl">
+      <PageHeader title="Referrals" description="Invite friends. You earn a reward only when they complete a meaningful action — not just for signing up." />
+      <Card className="mb-6">
+        <CardContent className="space-y-3">
+          <p className="flex items-center gap-2 text-sm font-semibold"><Link2 size={16} /> Your invite link</p>
+          <div className="flex gap-2"><input readOnly value={s.link} aria-label="Referral link" className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm" onFocus={(e) => e.currentTarget.select()} /><Button variant="outline" size="lg" className="h-10" onClick={() => copy(s.link)}><Copy size={14} /> Copy</Button></div>
+          <p className="text-xs text-[var(--color-text-muted)]">Code: <strong>{s.code}</strong></p>
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Link clicks" value={s.clicks} icon={MousePointerClick} />
+        <StatCard label="Sign-ups" value={s.signups} icon={UserPlus} iconColor="text-violet-600" iconBg="bg-violet-100" />
+        <StatCard label="Qualified" value={s.qualified} icon={UserCheck} iconColor="text-emerald-600" iconBg="bg-emerald-100" />
+        <StatCard label="Rewarded" value={s.rewarded} icon={Gift} iconColor="text-amber-600" iconBg="bg-amber-100" />
+      </div>
+      <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
+        {s.earnings.length ? <>Earned so far: {s.earnings.map((e) => money(e.amount, e.currency)).join(', ')}. </> : 'No rewards earned yet. '}
+        {s.pending > 0 && `${s.pending} referral${s.pending > 1 ? 's' : ''} awaiting qualification or review.`}
+      </p>
+      <Notice tone="info" className="mt-4">Rewards are CashMouver marketing credits for genuine new members. Referrals that look automated or duplicate are reviewed and may be declined.</Notice>
 
-      {/* Hero */}
-      <motion.div
-        variants={stagger}
-        className="relative overflow-hidden rounded-2xl p-8 text-white text-center"
-        style={{
-          background:
-            "linear-gradient(135deg, #1A6BFF 0%, #0D4FCC 40%, #00C896 100%)",
-        }}
-      >
-        <div
-          className="absolute inset-0 opacity-[0.06]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle, white 1px, transparent 1px)",
-            backgroundSize: "28px 28px",
-          }}
-        />
-        <div className="relative z-10">
-          <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur border border-white/20 flex items-center justify-center mx-auto mb-4">
-            <Gift className="w-8 h-8 text-white" />
-          </div>
-          <h2 className="font-display font-bold text-2xl">Invite & Earn</h2>
-          <p className="text-blue-100/80 text-sm font-body mt-2 max-w-sm mx-auto leading-relaxed">
-            Share your code with friends. Both of you earn rewards when they
-            complete their first swap.
-          </p>
-        </div>
-      </motion.div>
-
-      {/* Code card */}
-      {code && (
-        <motion.div
-          variants={stagger}
-          className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)] text-center"
-        >
-          <p className="text-sm text-[var(--color-text-secondary)] font-body mb-3">
-            Your Referral Code
-          </p>
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-[var(--color-bg)] border-2 border-dashed border-[var(--color-primary)]/40 mb-5">
-            <span className="font-display font-black text-3xl text-[var(--color-primary)] tracking-[0.2em]">
-              {code}
-            </span>
-          </div>
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={handleCopy}
-              className={cn(
-                "inline-flex items-center gap-2 h-10 px-5 rounded-xl text-sm font-semibold font-body transition-all",
-                copied
-                  ? "bg-emerald-600 text-white"
-                  : "bg-[var(--color-primary-light)] text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white",
-              )}
-            >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
-              {copied ? "Copied!" : "Copy Code"}
-            </button>
-            <button
-              onClick={handleShare}
-              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)]"
-            >
-              <Share2 size={16} /> Share
-            </button>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Stats */}
-      <motion.div variants={stagger} className="grid grid-cols-3 gap-4">
-        {[
-          {
-            label: "Total Referred",
-            value: referrals.length,
-            Icon: Users,
-            color: "text-[var(--color-primary)]",
-            bg: "bg-[var(--color-primary-light)]",
-          },
-          {
-            label: "Completed",
-            value: completed,
-            Icon: CheckCircle2,
-            color: "text-emerald-600",
-            bg: "bg-emerald-50",
-          },
-          {
-            label: "Pending",
-            value: pending,
-            Icon: Clock,
-            color: "text-amber-600",
-            bg: "bg-amber-50",
-          },
-        ].map(({ label, value, Icon, color, bg }) => (
-          <div
-            key={label}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-sm)] text-center"
-          >
-            <div
-              className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-2",
-                bg,
-              )}
-            >
-              <Icon size={20} className={color} />
-            </div>
-            <p className={cn("font-display font-bold text-2xl", color)}>
-              {value}
-            </p>
-            <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">
-              {label}
-            </p>
-          </div>
-        ))}
-      </motion.div>
-
-      {/* How it works */}
-      <motion.div
-        variants={stagger}
-        className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)]"
-      >
-        <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-4">
-          How it works
-        </h3>
-        <div className="space-y-3">
-          {[
-            {
-              num: "1",
-              title: "Share your code",
-              desc: "Send your unique referral code to friends",
-            },
-            {
-              num: "2",
-              title: "Friend signs up",
-              desc: "They create an account using your code",
-            },
-            {
-              num: "3",
-              title: "Both get rewarded",
-              desc: "Earn bonus when they complete their first swap",
-            },
-          ].map(({ num, title, desc }) => (
-            <div
-              key={num}
-              className="flex items-start gap-4 py-3 border-b border-[var(--color-divider)] last:border-0"
-            >
-              <div className="w-8 h-8 rounded-full bg-[var(--color-primary)] text-white flex items-center justify-center text-sm font-bold font-body shrink-0">
-                {num}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-[var(--color-text-primary)] font-body">
-                  {title}
-                </p>
-                <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">
-                  {desc}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Referral list */}
-      {referrals.length > 0 && (
-        <motion.div
-          variants={stagger}
-          className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)] overflow-hidden"
-        >
-          <div className="p-5 border-b border-[var(--color-border)]">
-            <h3 className="font-display font-bold text-[var(--color-text-primary)]">
-              Your Referrals
-            </h3>
-          </div>
-          <div className="divide-y divide-[var(--color-divider)]">
-            {referrals.map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center gap-4 px-5 py-4 hover:bg-[var(--color-bg)] transition-colors"
-              >
-                <UserAvatar name={r.referred.name} size="sm" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-[var(--color-text-primary)] font-body truncate">
-                    {r.referred.name}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">
-                    Joined {formatRelative(r.referred.createdAt)}
-                  </p>
-                </div>
-                <StatusBadge
-                  label={r.status}
-                  variant={STATUS_VARIANT[r.status] ?? "neutral"}
-                />
-                {r.referrerReward && (
-                  <span className="text-xs font-bold text-emerald-600 font-body">
-                    +${r.referrerReward}
-                  </span>
-                )}
-              </div>
+      <h2 className="mb-3 mt-8 text-lg">Your referrals</h2>
+      {list.isLoading ? <Skeleton className="h-32" /> : list.error ? <ErrorState error={list.error} /> : list.data!.items.length === 0 ? <EmptyState title="No referrals yet" description="Share your link to get started." /> : (
+        <>
+          <ul className="divide-y divide-[var(--color-divider)] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+            {list.data!.items.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                <div><p className="font-semibold">{r.referredName}</p><p className="text-xs text-[var(--color-text-muted)]">Joined {formatDate(r.createdAt)}{r.qualifyingAction && ` · needs: ${enumLabel(r.qualifyingAction)}`}</p></div>
+                <div className="text-right"><span className="rounded-full bg-[var(--color-bg)] px-2.5 py-0.5 text-xs font-semibold">{enumLabel(r.status)}</span>{r.reward && <p className="mt-1 text-xs text-[var(--color-success-text)]">{money(r.reward.amount, r.reward.currency)}</p>}</div>
+              </li>
             ))}
-          </div>
-        </motion.div>
+          </ul>
+          <Pager meta={list.data!.meta} onPage={setPage} />
+        </>
       )}
-    </motion.div>
-  );
+    </div>
+  )
 }

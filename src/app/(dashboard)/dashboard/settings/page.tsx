@@ -1,218 +1,184 @@
 'use client'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { motion } from 'framer-motion'
-import { useEffect, useState } from 'react'
-import { useTheme } from 'next-themes'
-import { Sun, Moon, Monitor, Lock, Smartphone, AlertTriangle } from 'lucide-react'
-import toast from 'react-hot-toast'
-import { userService } from '@/services'
-import { authService } from '@/services/auth.service'
-import { useAuthStore } from '@/store/auth.store'
-import { PageHeader } from '@/components/ui/page-header'
-import { changePasswordSchema } from '@/lib/validators'
-import type { z } from 'zod'
-import { cn } from '@/lib/utils'
+import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Smartphone, ShieldCheck } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { changePasswordSchema, phoneOtpRequestSchema, phoneOtpVerifySchema, type PublicUserDto } from '@/contracts'
+import { api, authCall, errorMessage, tokenStore } from '@/lib/api'
+import { withReauth } from '@/store/reauth.store'
+import { useAuthStore } from '@/store/auth.store'
+import { validate } from '@/lib/form'
+import { formatDateTime } from '@/lib/format'
+import { Button } from '@/components/ui/button'
+import { Field, Switch, TextInput } from '@/components/ui/field'
+import { PageHeader } from '@/components/ui/page-header'
+import { StatusBadge } from '@/components/ui/status-badge'
+import { Notice } from '@/components/ui/states'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
 
-type ChangePasswordForm = z.infer<typeof changePasswordSchema>
+interface Session { id: string; deviceName: string | null; ipAddress: string | null; userAgent: string | null; createdAt: string; lastUsedAt: string; current: boolean }
+type Person = PublicUserDto & { blockedAt?: string; notes?: string | null }
 
-const inputCls = (err?: string) => cn(
-  'w-full h-10 px-3 rounded-xl border bg-[var(--color-surface)] font-body text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none transition-all focus:ring-2',
-  err
-    ? 'border-[var(--color-error)] focus:ring-[var(--color-error)]/20'
-    : 'border-[var(--color-border)] focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)]',
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <section className="mb-8 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"><h2 className="mb-3 text-lg">{title}</h2>{children}</section>
 )
 
-const Card = ({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) => (
-  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)]">
-    <div className="flex items-center gap-2.5 mb-5">
-      <div className="w-8 h-8 rounded-lg bg-[var(--color-primary-light)] flex items-center justify-center">
-        <Icon size={16} className="text-[var(--color-primary)]" />
-      </div>
-      <h3 className="font-display font-bold text-[var(--color-text-primary)]">{title}</h3>
-    </div>
-    {children}
-  </div>
-)
+function PasswordForm() {
+  const [v, setV] = useState({ currentPassword: '', newPassword: '' })
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const m = useMutation({
+    mutationFn: (b: { currentPassword: string; newPassword: string }) => authCall<{ tokens?: { accessToken: string; accessTokenExpiresAt: string } }>('change-password', b),
+    onSuccess: (r) => { if (r.tokens) tokenStore.set(r.tokens.accessToken, r.tokens.accessTokenExpiresAt); toast.success('Password changed. Other devices were signed out.'); setV({ currentPassword: '', newPassword: '' }) },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  return (
+    <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); const { data, errors } = validate(changePasswordSchema, v); setErrors(errors); if (data) m.mutate(data) }}>
+      <Field label="Current password" error={errors.currentPassword}><TextInput type="password" autoComplete="current-password" value={v.currentPassword} onChange={(e) => setV({ ...v, currentPassword: e.target.value })} invalid={!!errors.currentPassword} /></Field>
+      <Field label="New password" error={errors.newPassword} hint="At least 8 characters with upper, lower case and a number."><TextInput type="password" autoComplete="new-password" value={v.newPassword} onChange={(e) => setV({ ...v, newPassword: e.target.value })} invalid={!!errors.newPassword} /></Field>
+      <div><Button type="submit" disabled={m.isPending}>{m.isPending ? 'Changing…' : 'Change password'}</Button></div>
+    </form>
+  )
+}
 
-const ToggleRow = ({ label, sub, checked, onChange }: { label: string; sub?: string; checked: boolean; onChange: (v: boolean) => void }) => (
-  <div className="flex items-center justify-between py-3 border-b border-[var(--color-divider)] last:border-0">
+function TwoFactor() {
+  const me = useAuthStore((s) => s.user)!
+  const refresh = useAuthStore((s) => s.refreshUser)
+  const [setup, setSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [disable, setDisable] = useState({ open: false, password: '', code: '' })
+  const start = useMutation({ mutationFn: () => withReauth(() => api.post<{ secret: string; otpauthUrl: string }>('/auth/2fa/setup')), onSuccess: setSetup, onError: (e) => toast.error(errorMessage(e)) })
+  const enable = useMutation({
+    mutationFn: () => api.post('/auth/2fa/enable', { code }),
+    onSuccess: async () => { toast.success('Two-factor authentication is on'); setSetup(null); setCode(''); await refresh() },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const off = useMutation({
+    mutationFn: () => api.post('/auth/2fa/disable', { password: disable.password, code: disable.code }),
+    onSuccess: async () => { toast.success('Two-factor authentication is off'); setDisable({ open: false, password: '', code: '' }); await refresh() },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  return (
     <div>
-      <p className="text-sm font-semibold text-[var(--color-text-primary)] font-body">{label}</p>
-      {sub && <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">{sub}</p>}
-    </div>
-    <button
-      onClick={() => onChange(!checked)}
-      className={cn(
-        'relative w-11 h-6 rounded-full transition-colors shrink-0',
-        checked ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-border)]',
+      <p className="mb-3 flex items-center gap-2 text-sm"><ShieldCheck size={16} />Authenticator-app codes at sign-in. <StatusBadge label={me.twoFactorEnabled ? 'On' : 'Off'} variant={me.twoFactorEnabled ? 'success' : 'neutral'} /></p>
+      {!me.twoFactorEnabled && !setup && <Button variant="outline" disabled={start.isPending} onClick={() => start.mutate()}>Set up</Button>}
+      {setup && (
+        <div className="space-y-3 text-sm">
+          <p>Add this key to your authenticator app (Google Authenticator, 1Password, Authy…), then enter the 6-digit code.</p>
+          <p><code className="break-all rounded bg-[var(--color-bg)] px-2 py-1">{setup.secret}</code></p>
+          <p><a className="underline" href={setup.otpauthUrl}>Open in authenticator app</a></p>
+          <div className="flex items-end gap-3"><Field label="Code"><TextInput inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
+            <Button disabled={code.length !== 6 || enable.isPending} onClick={() => enable.mutate()}>Turn on</Button></div>
+        </div>
       )}
-    >
-      <span className={cn(
-        'absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform',
-        checked ? 'translate-x-6' : 'translate-x-1',
-      )} />
-    </button>
-  </div>
-)
+      {me.twoFactorEnabled && <Button variant="outline" onClick={() => setDisable({ ...disable, open: true })}>Turn off</Button>}
+      {disable.open && (
+        <div className="mt-4 flex flex-wrap items-end gap-3">
+          <Field label="Password"><TextInput type="password" value={disable.password} onChange={(e) => setDisable({ ...disable, password: e.target.value })} /></Field>
+          <Field label="Authenticator code"><TextInput inputMode="numeric" value={disable.code} onChange={(e) => setDisable({ ...disable, code: e.target.value })} /></Field>
+          <Button disabled={!disable.password || !disable.code || off.isPending} onClick={() => off.mutate()}>Confirm</Button>
+          <Button variant="ghost" onClick={() => setDisable({ open: false, password: '', code: '' })}>Cancel</Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Phone() {
+  const me = useAuthStore((s) => s.user)!
+  const refresh = useAuthStore((s) => s.refreshUser)
+  const [phone, setPhone] = useState('')
+  const [code, setCode] = useState('')
+  const [sent, setSent] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const req = useMutation({ mutationFn: (b: unknown) => api.post('/users/me/phone/request-otp', b), onSuccess: () => { setSent(true); toast.success('Code sent by SMS') }, onError: (e) => toast.error(errorMessage(e)) })
+  const verify = useMutation({ mutationFn: (b: unknown) => api.post('/users/me/phone/verify-otp', b), onSuccess: async () => { toast.success('Phone verified'); setSent(false); setCode(''); await refresh() }, onError: (e) => toast.error(errorMessage(e)) })
+  return (
+    <div>
+      <p className="mb-3 flex items-center gap-2 text-sm"><Smartphone size={16} />{me.phone ?? 'No phone number'} {me.phone && <StatusBadge label={me.phoneVerified ? 'Verified' : 'Unverified'} variant={me.phoneVerified ? 'success' : 'warning'} />}</p>
+      {!me.phoneVerified && (
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Phone (international format)" error={errors.phone}><TextInput placeholder="+44 20 7946 0958" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^\d+]/g, ''))} invalid={!!errors.phone} /></Field>
+          <Button variant="outline" disabled={req.isPending} onClick={() => { const { data, errors } = validate(phoneOtpRequestSchema, { phone }); setErrors(errors); if (data) req.mutate(data) }}>{sent ? 'Resend code' : 'Send code'}</Button>
+          {sent && <><Field label="6-digit code" error={errors.code}><TextInput inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} /></Field>
+            <Button disabled={verify.isPending} onClick={() => { const { data, errors } = validate(phoneOtpVerifySchema, { code }); setErrors(errors); if (data) verify.mutate(data) }}>Verify</Button></>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function People({ title, url, empty, action }: { title: string; url: string; empty: string; action: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: [url], queryFn: () => api.get<Person[]>(url) })
+  const rm = useMutation({ mutationFn: (id: string) => api.del(`${url}/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: [url] }), onError: (e) => toast.error(errorMessage(e)) })
+  return (
+    <Section title={title}>
+      <ul className="space-y-2 text-sm">
+        {(q.data ?? []).map((p) => <li key={p.id} className="flex items-center justify-between"><Link className="underline" href={`/dashboard/members/${p.id}`}>{p.name}</Link><Button size="sm" variant="outline" disabled={rm.isPending} onClick={() => rm.mutate(p.id)}>{action}</Button></li>)}
+        {!q.isLoading && !q.data?.length && <li className="text-[var(--color-text-secondary)]">{empty}</li>}
+      </ul>
+    </Section>
+  )
+}
 
 export default function SettingsPage() {
-  const { theme, setTheme } = useTheme()
-  const router   = useRouter()
-  const qc       = useQueryClient()
-  const { logout } = useAuthStore()
-
-  const [notifSettings, setNotifSettings] = useState({
-    receiveEmails: true,
-    receiveSMS:    true,
-    receivePush:   true,
+  const me = useAuthStore((s) => s.user)!
+  const setUser = useAuthStore((s) => s.setUser)
+  const router = useRouter()
+  const sessions = useQuery({ queryKey: ['sessions'], queryFn: () => api.get<Session[]>('/auth/sessions') })
+  const qc = useQueryClient()
+  const [del, setDel] = useState(false)
+  const pref = useMutation({
+    mutationFn: (b: { receiveEmails?: boolean; receiveSMS?: boolean; receivePush?: boolean }) => api.patch<typeof me>('/users/me/preferences', b),
+    onSuccess: setUser, onError: (e) => toast.error(errorMessage(e)),
   })
-  const [pwLoading, setPwLoading] = useState(false)
-
-  const { data } = useQuery({
-    queryKey: ['profile-settings'],
-    queryFn:  userService.getProfile,
+  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/auth/sessions/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }), onError: (e) => toast.error(errorMessage(e)) })
+  const logoutAll = useMutation({
+    mutationFn: () => withReauth(() => api.post('/auth/logout-all')),
+    onSuccess: async () => { await useAuthStore.getState().logout(); router.replace('/login') }, onError: (e) => toast.error(errorMessage(e)),
   })
-
-  useEffect(() => {
-    if (data?.data) {
-      setNotifSettings({
-        receiveEmails: data.data.receiveEmails,
-        receiveSMS:    data.data.receiveSMS,
-        receivePush:   data.data.receivePush,
-      })
-    }
-  }, [data])
-
-  const handleNotifToggle = async (key: keyof typeof notifSettings, val: boolean) => {
-    const prev = { ...notifSettings }
-    setNotifSettings(s => ({ ...s, [key]: val }))
-    try {
-      await userService.updateSettings({ [key]: val })
-    } catch {
-      setNotifSettings(prev)
-      toast.error('Failed to update setting')
-    }
-  }
-
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<ChangePasswordForm>({
-    resolver: zodResolver(changePasswordSchema),
-  })
-
-  const onChangePassword = async (data: ChangePasswordForm) => {
-    setPwLoading(true)
-    try {
-      await authService.changePassword(data.currentPassword, data.newPassword)
-      toast.success('Password updated')
-      reset()
-    } catch { toast.error('Current password is incorrect') }
-    finally { setPwLoading(false) }
-  }
-
-  const handleDeleteAccount = async () => {
-    const confirmed = prompt('Type DELETE to confirm account deletion:')
-    if (confirmed !== 'DELETE') return
-    toast.error('Account deletion — contact support at support@cashmova.com')
-  }
-
-  const THEMES = [
-    { key: 'light',  label: 'Light',  icon: Sun     },
-    { key: 'dark',   label: 'Dark',   icon: Moon    },
-    { key: 'system', label: 'System', icon: Monitor },
-  ]
 
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto space-y-5">
-      <PageHeader title="Settings" description="Manage your app preferences and security" />
+    <div className="max-w-3xl">
+      <PageHeader title="Settings" description={me.email} />
+      {!me.emailVerified && <Notice tone="warning" className="mb-6">Your email isn&apos;t verified yet. Check your inbox for the link.</Notice>}
 
-      {/* Appearance */}
-      <Card title="Appearance" icon={Monitor}>
-        <p className="text-sm text-[var(--color-text-secondary)] font-body mb-3">Choose your preferred theme</p>
-        <div className="grid grid-cols-3 gap-3">
-          {THEMES.map(({ key, label, icon: Icon }) => (
-            <button key={key} onClick={() => setTheme(key)}
-              className={cn(
-                'flex flex-col items-center gap-2 py-4 rounded-xl border-2 transition-all font-body',
-                theme === key
-                  ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)] text-[var(--color-primary)]'
-                  : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)]/40',
-              )}>
-              <Icon size={20} />
-              <span className="text-xs font-semibold">{label}</span>
-            </button>
+      <Section title="Password"><PasswordForm /></Section>
+      <Section title="Two-factor authentication"><TwoFactor /></Section>
+      <Section title="Phone number"><Phone /></Section>
+
+      <Section title="Where you're signed in">
+        <ul className="space-y-2 text-sm">
+          {(sessions.data ?? []).map((s) => (
+            <li key={s.id} className="flex items-center justify-between gap-3">
+              <span>{s.deviceName ?? 'Unknown device'} {s.current && <StatusBadge label="This device" variant="primary" />}<span className="block text-xs text-[var(--color-text-muted)]">{s.ipAddress} · last active {formatDateTime(s.lastUsedAt)}</span></span>
+              {!s.current && <Button size="sm" variant="outline" disabled={revoke.isPending} onClick={() => revoke.mutate(s.id)}>Sign out</Button>}
+            </li>
           ))}
+        </ul>
+        <Button className="mt-4" variant="outline" disabled={logoutAll.isPending} onClick={() => logoutAll.mutate()}>Sign out of all devices</Button>
+      </Section>
+
+      <Section title="Notifications">
+        <div className="space-y-3">
+          <Switch label="Email" checked={me.receiveEmails} disabled={pref.isPending} onChange={(v) => pref.mutate({ receiveEmails: v })} />
+          <Switch label="SMS" checked={me.receiveSMS} disabled={pref.isPending} onChange={(v) => pref.mutate({ receiveSMS: v })} />
+          <Switch label="Push" checked={me.receivePush} disabled={pref.isPending} onChange={(v) => pref.mutate({ receivePush: v })} />
         </div>
-      </Card>
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]">Security and payment notices are always sent.</p>
+      </Section>
 
-      {/* Notifications */}
-      <Card title="Notifications" icon={Smartphone}>
-        <ToggleRow
-          label="Email Notifications"
-          sub="Swap updates, offers and security alerts"
-          checked={notifSettings.receiveEmails}
-          onChange={v => handleNotifToggle('receiveEmails', v)}
-        />
-        <ToggleRow
-          label="SMS Notifications"
-          sub="OTP codes and urgent alerts"
-          checked={notifSettings.receiveSMS}
-          onChange={v => handleNotifToggle('receiveSMS', v)}
-        />
-        <ToggleRow
-          label="Push Notifications"
-          sub="Real-time swap and message alerts"
-          checked={notifSettings.receivePush}
-          onChange={v => handleNotifToggle('receivePush', v)}
-        />
-      </Card>
+      <People title="Favourite members" url="/users/me/favorites" empty="You haven't favourited anyone." action="Remove" />
+      <People title="Blocked members" url="/users/me/blocked" empty="You haven't blocked anyone." action="Unblock" />
 
-      {/* Security */}
-      <Card title="Security" icon={Lock}>
-        <p className="text-sm text-[var(--color-text-secondary)] font-body mb-4">Change your password</p>
-        <form onSubmit={handleSubmit(onChangePassword)} className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-[var(--color-text-secondary)] font-body block mb-1.5">Current Password</label>
-            <input {...register('currentPassword')} type="password" placeholder="Current password"
-              className={inputCls(errors.currentPassword?.message)} />
-            {errors.currentPassword && <p className="text-xs text-[var(--color-error)] font-body mt-1">{errors.currentPassword.message}</p>}
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-semibold text-[var(--color-text-secondary)] font-body block mb-1.5">New Password</label>
-              <input {...register('newPassword')} type="password" placeholder="New password"
-                className={inputCls(errors.newPassword?.message)} />
-              {errors.newPassword && <p className="text-xs text-[var(--color-error)] font-body mt-1">{errors.newPassword.message}</p>}
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-[var(--color-text-secondary)] font-body block mb-1.5">Confirm Password</label>
-              <input {...register('confirmPassword')} type="password" placeholder="Confirm"
-                className={inputCls(errors.confirmPassword?.message)} />
-              {errors.confirmPassword && <p className="text-xs text-[var(--color-error)] font-body mt-1">{errors.confirmPassword.message}</p>}
-            </div>
-          </div>
-          <button type="submit" disabled={pwLoading}
-            className="h-9 px-5 rounded-xl bg-[var(--color-primary)] text-white text-sm font-semibold font-body hover:bg-[var(--color-primary-dark)] transition-colors shadow-[var(--shadow-primary)] disabled:opacity-50 flex items-center gap-2">
-            {pwLoading && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-            Update Password
-          </button>
-        </form>
-      </Card>
-
-      {/* Danger zone */}
-      <Card title="Danger Zone" icon={AlertTriangle}>
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-semibold text-red-800 font-body">Delete Account</p>
-          <p className="text-xs text-red-600 font-body mt-1 mb-3 leading-relaxed">
-            Permanently delete your Cashmova account and all associated data. This action cannot be undone.
-          </p>
-          <button onClick={handleDeleteAccount}
-            className="h-8 px-4 rounded-lg bg-red-600 text-white text-xs font-semibold font-body hover:bg-red-700 transition-colors">
-            Delete My Account
-          </button>
-        </div>
-      </Card>
-    </motion.div>
+      <Section title="Delete account">
+        <p className="mb-3 text-sm text-[var(--color-text-secondary)]">Deactivates your account and removes your offers. Active swaps must be finished first. Payment records are retained as required by law.</p>
+        <Button variant="outline" className="border-red-300 text-red-600" onClick={() => setDel(true)}>Delete my account</Button>
+      </Section>
+      <ConfirmDialog open={del} onOpenChange={setDel} title="Delete your account?" description="This cannot be undone." confirmLabel="Delete account" destructive
+        onConfirm={async () => { await withReauth(() => api.del('/users/me')); tokenStore.clear(); router.replace('/') ; router.refresh() }} />
+    </div>
   )
 }

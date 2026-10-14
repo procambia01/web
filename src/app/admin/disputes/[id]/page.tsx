@@ -1,193 +1,82 @@
 'use client'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, CheckCircle, AlertTriangle, ArrowLeftRight } from 'lucide-react'
-import { motion } from 'framer-motion'
+import { use, useState } from 'react'
+import Link from 'next/link'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { useState } from 'react'
-import { adminService } from '@/services'
+import { DISPUTE_OUTCOMES, resolveDisputeSchema, type DisputeDto } from '@/contracts'
+import { api, errorMessage } from '@/lib/api'
+import { validate } from '@/lib/form'
+import { DISPUTE_VARIANT } from '@/lib/constants'
+import { enumLabel, formatDateTime } from '@/lib/format'
+import { Button } from '@/components/ui/button'
+import { Field, NativeSelect, TextArea } from '@/components/ui/field'
+import { PageHeader } from '@/components/ui/page-header'
 import { StatusBadge } from '@/components/ui/status-badge'
-import { UserAvatar } from '@/components/ui/user-avatar'
-import { formatRelative, formatCurrency } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import { ErrorState, Notice, PageLoader } from '@/components/ui/states'
+import { ConfirmDialog } from '@/components/shared/ConfirmDialog'
+import { Kv } from '@/components/admin/bits'
 
-const PRIORITY_VARIANT: Record<string, 'error' | 'warning' | 'info' | 'neutral'> = {
-  URGENT: 'error', HIGH: 'warning', MEDIUM: 'info', LOW: 'neutral',
-}
-const STATUS_VARIANT: Record<string, 'warning' | 'info' | 'success' | 'neutral' | 'error'> = {
-  OPEN: 'warning', INVESTIGATING: 'info', RESOLVED: 'success',
-  CLOSED: 'neutral', ESCALATED: 'error',
-}
+type AdminDispute = DisputeDto & { reporterId: string; againstId: string; assignedTo: string | null }
 
-const Card = ({ title, children }: { title?: string; children: React.ReactNode }) => (
-  <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-sm)]">
-    {title && <h3 className="font-display font-bold text-[var(--color-text-primary)] mb-4">{title}</h3>}
-    {children}
-  </div>
-)
+export default function AdminDisputeDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params)
+  const qc = useQueryClient()
+  const [outcome, setOutcome] = useState<string>('NO_ACTION')
+  const [note, setNote] = useState('')
+  const [swapOutcome, setSwapOutcome] = useState('')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [evidence, setEvidence] = useState<string | null>(null)
+  const [closeOpen, setCloseOpen] = useState(false)
+  const q = useQuery({ queryKey: ['admin', 'dispute', id], queryFn: () => api.get<AdminDispute>(`/admin/disputes/${id}`) })
+  const refresh = () => qc.invalidateQueries({ queryKey: ['admin', 'dispute', id] })
+  const investigate = useMutation({ mutationFn: () => api.post(`/admin/disputes/${id}/investigate`), onSuccess: refresh, onError: (e) => toast.error(errorMessage(e)) })
+  const resolve = useMutation({ mutationFn: (b: unknown) => api.post(`/admin/disputes/${id}/resolve`, b), onSuccess: () => { toast.success('Dispute resolved'); void refresh() }, onError: (e) => toast.error(errorMessage(e)) })
 
-const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
-  <div className="flex items-center justify-between py-2.5 border-b border-[var(--color-divider)] last:border-0">
-    <span className="text-sm text-[var(--color-text-secondary)] font-body">{label}</span>
-    <span className="text-sm font-semibold text-[var(--color-text-primary)] font-body text-right max-w-[60%]">{value}</span>
-  </div>
-)
+  if (q.isLoading) return <PageLoader />
+  if (q.error || !q.data) return <ErrorState error={q.error} onRetry={() => q.refetch()} />
+  const d = q.data
 
-export default function AdminDisputeDetailPage() {
-  const { id }  = useParams<{ id: string }>()
-  const router  = useRouter()
-  const qc      = useQueryClient()
-  const [resolution, setResolution] = useState('')
-  const [resolveNote, setResolveNote] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin-dispute', id],
-    queryFn:  () => adminService.getDisputeById(id),
-  })
-
-  const dispute = data?.data
-  if (isLoading || !dispute) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
-
-  const handleResolve = async () => {
-    if (!resolution.trim()) { toast.error('Resolution is required'); return }
-    setLoading(true)
-    try {
-      await adminService.resolveDispute(id, resolution, resolveNote || undefined)
-      toast.success('Dispute resolved')
-      qc.invalidateQueries({ queryKey: ['admin-dispute', id] })
-    } catch { toast.error('Failed to resolve') }
-    finally { setLoading(false) }
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const { data, errors } = validate(resolveDisputeSchema, { outcome, note, swapOutcome: swapOutcome || undefined })
+    setErrors(errors)
+    if (data) resolve.mutate(data)
   }
-
-  const canResolve = dispute.status === 'OPEN' || dispute.status === 'INVESTIGATING'
-
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl mx-auto space-y-5">
-      <div className="flex items-center gap-4">
-        <button onClick={() => router.back()}
-          className="w-9 h-9 rounded-xl border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] transition-colors">
-          <ArrowLeft size={18} />
-        </button>
-        <div className="flex-1">
-          <h1 className="font-display font-bold text-2xl text-[var(--color-text-primary)]">Dispute Details</h1>
-          <p className="text-xs text-[var(--color-text-muted)] font-body mt-0.5">#{id.slice(-10).toUpperCase()}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge label={dispute.priority} variant={PRIORITY_VARIANT[dispute.priority] ?? 'neutral'} />
-          <StatusBadge label={dispute.status} variant={STATUS_VARIANT[dispute.status] ?? 'neutral'} dot />
-        </div>
-      </div>
+    <div className="max-w-3xl">
+      <PageHeader title={enumLabel(d.reason)} description={`Dispute ${d.id}`} actions={<Link className="text-sm underline" href="/admin/disputes">Back</Link>} />
+      <Notice tone="info" className="mb-6">Outcomes affect the swap record and the members&apos; accounts only. CashMouver does not hold, move or refund exchanged cash.</Notice>
+      <dl className="mb-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <Kv k="Status" v={<StatusBadge label={enumLabel(d.status)} variant={DISPUTE_VARIANT[d.status]} />} /><Kv k="Priority" v={d.priority} />
+        <Kv k="Reported by" v={<Link className="underline" href={`/admin/users/${d.reporterId}`}>member</Link>} /><Kv k="Against" v={<Link className="underline" href={`/admin/users/${d.againstId}`}>member</Link>} />
+        <Kv k="Swap" v={d.swapId} /><Kv k="Opened" v={formatDateTime(d.createdAt)} />{d.outcome && <Kv k="Outcome" v={enumLabel(d.outcome)} />}
+      </dl>
+      <p className="mb-6 whitespace-pre-wrap rounded-xl bg-[var(--color-bg)] p-3 text-sm">{d.description}</p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
-          {/* Dispute info */}
-          <Card title="Dispute Information">
-            <Row label="Reason" value={dispute.reason.replace(/_/g, ' ')} />
-            <Row label="Filed" value={formatRelative(dispute.createdAt)} />
-            {dispute.resolvedAt && <Row label="Resolved" value={formatRelative(dispute.resolvedAt)} />}
-            <div className="pt-3">
-              <p className="text-xs font-semibold text-[var(--color-text-secondary)] font-body uppercase tracking-wide mb-2">Description</p>
-              <p className="text-sm text-[var(--color-text-primary)] font-body leading-relaxed bg-[var(--color-bg)] rounded-xl p-3 border border-[var(--color-border)]">
-                {dispute.description}
-              </p>
-            </div>
-          </Card>
+      <h2 className="mb-2 text-lg">Evidence</h2>
+      <ul className="mb-6 space-y-2 text-sm">
+        {d.evidence.map((ev) => <li key={ev.id} className="flex items-center justify-between rounded-xl border border-[var(--color-border)] p-2"><span>{enumLabel(ev.type)} · {ev.mimeType} · {(ev.sizeBytes / 1024).toFixed(0)} KB · {formatDateTime(ev.createdAt)}</span><Button size="sm" variant="outline" onClick={() => setEvidence(ev.id)}>Open</Button></li>)}
+        {!d.evidence.length && <li className="text-[var(--color-text-secondary)]">None submitted.</li>}
+      </ul>
 
-          {/* Swap summary */}
-          <Card title="Related Swap">
-            <div className="flex items-center gap-4 p-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)]">
-              <span className="text-2xl">💱</span>
-              <div className="flex items-center gap-2 text-sm font-body font-semibold text-[var(--color-text-primary)]">
-                {formatCurrency(dispute.swap.initiatorGivesAmount, dispute.swap.initiatorGivesCurrency)}
-                <ArrowLeftRight size={14} className="text-[var(--color-text-muted)]" />
-                {formatCurrency(dispute.swap.receiverGivesAmount, dispute.swap.receiverGivesCurrency)}
-              </div>
-            </div>
-          </Card>
+      <h2 className="mb-2 text-lg">Timeline</h2>
+      <ol className="mb-8 space-y-1 text-sm">{d.events.map((ev) => <li key={ev.id}><span className="text-[var(--color-text-muted)]">{formatDateTime(ev.createdAt)}</span> — {enumLabel(ev.type)}{ev.note && `: ${ev.note}`}</li>)}</ol>
 
-          {/* Resolution */}
-          {canResolve && (
-            <Card title="Resolve Dispute">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)] font-body block mb-1.5">
-                    Resolution <span className="text-[var(--color-error)]">*</span>
-                  </label>
-                  <textarea
-                    value={resolution}
-                    onChange={e => setResolution(e.target.value)}
-                    rows={3}
-                    placeholder="Describe the resolution decision…"
-                    className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] text-sm font-body text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 resize-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-[var(--color-text-secondary)] font-body block mb-1.5">
-                    Internal Note (optional)
-                  </label>
-                  <textarea
-                    value={resolveNote}
-                    onChange={e => setResolveNote(e.target.value)}
-                    rows={2}
-                    placeholder="Internal notes visible only to admins…"
-                    className="w-full px-3 py-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] text-sm font-body text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 resize-none"
-                  />
-                </div>
-                <button
-                  onClick={handleResolve}
-                  disabled={loading || !resolution.trim()}
-                  className="h-10 px-5 rounded-xl bg-emerald-600 text-white text-sm font-semibold font-body hover:bg-emerald-700 transition-colors flex items-center gap-2 disabled:opacity-50"
-                >
-                  {loading
-                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    : <CheckCircle size={16} />}
-                  Mark as Resolved
-                </button>
-              </div>
-            </Card>
-          )}
-
-          {dispute.resolution && (
-            <Card title="Resolution">
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100">
-                <p className="text-sm text-emerald-800 font-body leading-relaxed">{dispute.resolution}</p>
-              </div>
-            </Card>
-          )}
-        </div>
-
-        {/* Right */}
-        <div className="space-y-5">
-          <Card title="Reporter">
-            <div className="flex items-center gap-3">
-              <UserAvatar name={dispute.reporter.name} image={dispute.reporter.image} size="md" />
-              <div>
-                <p className="font-semibold text-sm text-[var(--color-text-primary)] font-body">{dispute.reporter.name}</p>
-                <p className="text-xs text-[var(--color-text-muted)] font-body">#{dispute.reporter.id.slice(-8)}</p>
-              </div>
-            </div>
-          </Card>
-
-          {/* Evidence */}
-          {dispute.evidence && dispute.evidence.length > 0 && (
-            <Card title="Evidence">
-              <div className="space-y-2">
-                {dispute.evidence.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-2 p-2.5 rounded-lg bg-[var(--color-bg)] border border-[var(--color-border)] text-xs text-[var(--color-primary)] font-body hover:bg-[var(--color-primary-light)] transition-colors">
-                    📎 Evidence {i + 1}
-                  </a>
-                ))}
-              </div>
-            </Card>
-          )}
-        </div>
-      </div>
-    </motion.div>
+      {d.status === 'OPEN' && <Button onClick={() => investigate.mutate()} disabled={investigate.isPending}>Start investigating</Button>}
+      {d.status === 'INVESTIGATING' && (
+        <form onSubmit={submit} className="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <h2 className="text-lg">Resolve</h2>
+          <Field label="Outcome" error={errors.outcome}><NativeSelect value={outcome} onChange={(e) => setOutcome(e.target.value)}>{DISPUTE_OUTCOMES.map((o) => <option key={o} value={o}>{enumLabel(o)}</option>)}</NativeSelect></Field>
+          <Field label="Swap record" hint="Needed when the swap is still disputed and the outcome doesn't already settle it." error={errors.swapOutcome}>
+            <NativeSelect value={swapOutcome} onChange={(e) => setSwapOutcome(e.target.value)}><option value="">Leave as is</option><option value="COMPLETED">Mark completed</option><option value="CANCELLED">Mark cancelled</option></NativeSelect></Field>
+          <Field label="Resolution note (shown to both members)" error={errors.note}><TextArea value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          <Button type="submit" disabled={resolve.isPending}>Resolve dispute</Button>
+        </form>
+      )}
+      {d.status === 'RESOLVED' && <Button variant="outline" onClick={() => setCloseOpen(true)}>Close dispute</Button>}
+      <ConfirmDialog open={closeOpen} onOpenChange={setCloseOpen} title="Close this dispute?" confirmLabel="Close" onConfirm={async () => { await api.post(`/admin/disputes/${id}/close`); await refresh() }} />
+      {evidence && <ConfirmDialog open onOpenChange={(o) => !o && setEvidence(null)} title="Open evidence" description="Opens a temporary private link. Access is audit-logged." confirmLabel="Open"
+        onConfirm={async () => { const r = await api.get<{ url: string }>(`/admin/disputes/evidence/${evidence}/url`); window.open(r.url, '_blank', 'noopener,noreferrer') }} />}
+    </div>
   )
 }

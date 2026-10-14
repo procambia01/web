@@ -1,87 +1,101 @@
-import { CURRENCIES } from './constants'
+import type { CurrencyDto } from '@/contracts'
 
-// ── Currency ───────────────────────────────────────────────
-export function formatCurrency(amount: number, code: string): string {
-  const c = CURRENCIES.find(x => x.code === code)
-  const symbol = c?.symbol ?? code
-  return `${symbol}${formatNumber(amount)}`
+/**
+ * Money arrives as decimal STRINGS ("1500.50"). They are formatted with Intl
+ * (which accepts decimal strings) and never run through parseFloat, so there
+ * is no binary-float rounding on the way to the screen.
+ */
+export function formatMoney(amount: string | null | undefined, code: string, currencies?: CurrencyDto[]): string {
+  if (amount === null || amount === undefined || amount === '') return '—'
+  const minor = currencies?.find((c) => c.code === code)?.minorUnit
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: minor ?? undefined,
+      maximumFractionDigits: minor ?? 2,
+    }).format(amount as unknown as number)
+  } catch {
+    return `${amount} ${code}`
+  }
 }
 
-export function getCurrencySymbol(code: string) {
-  return CURRENCIES.find(x => x.code === code)?.symbol ?? code
+/** Plain number with grouping but no currency symbol — for amount inputs and rates. */
+export function formatNumber(value: string | null | undefined, maxFraction = 6): string {
+  if (value === null || value === undefined || value === '') return '—'
+  try {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: maxFraction }).format(value as unknown as number)
+  } catch {
+    return value
+  }
 }
 
-export function getCurrencyFlag(code: string) {
-  return CURRENCIES.find(x => x.code === code)?.flag ?? '🏳️'
+/** Exchange rates keep up to 6 significant decimals but drop trailing zeros. */
+export function formatRate(rate: string | null | undefined): string {
+  return formatNumber(rate, 6)
 }
 
-export function getCurrencyName(code: string) {
-  return CURRENCIES.find(x => x.code === code)?.name ?? code
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
 }
 
-// ── Numbers ───────────────────────────────────────────────
-export function formatNumber(n: number, decimals = 2): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000)
-    return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: decimals })
-  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: decimals })
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(iso))
 }
 
-export function formatPercent(n: number, decimals = 1): string {
-  return `${(n * 100).toFixed(decimals)}%`
+export function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const diff = Date.now() - new Date(iso).getTime()
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  const mins = Math.round(diff / 60_000)
+  if (Math.abs(mins) < 1) return rtf.format(0, 'minute')
+  if (Math.abs(mins) < 60) return rtf.format(-mins, 'minute')
+  const hours = Math.round(mins / 60)
+  if (Math.abs(hours) < 24) return rtf.format(-hours, 'hour')
+  return rtf.format(-Math.round(hours / 24), 'day')
 }
 
-export function formatRating(n: number): string {
-  return n.toFixed(1)
-}
-
-export function trustScoreLabel(score: number): string {
-  if (score >= 90) return 'Excellent'
-  if (score >= 75) return 'Very Good'
-  if (score >= 60) return 'Good'
-  if (score >= 40) return 'Fair'
-  return 'New'
-}
-
-export function trustScoreColor(score: number): string {
-  if (score >= 90) return 'text-emerald-600'
-  if (score >= 75) return 'text-blue-600'
-  if (score >= 60) return 'text-amber-600'
-  if (score >= 40) return 'text-orange-600'
-  return 'text-gray-500'
-}
-
-// ── Dates ─────────────────────────────────────────────────
-export function formatDate(d: string | Date): string {
-  return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-export function formatTime(d: string | Date): string {
-  return new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-}
-
-export function formatDateTime(d: string | Date): string {
-  return `${formatDate(d)}, ${formatTime(d)}`
-}
-
-export function formatRelative(d: string | Date): string {
-  const now  = Date.now()
-  const date = new Date(d).getTime()
-  const diff = Math.floor((now - date) / 1000)
-  if (diff < 60)   return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400)return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
-  return formatDate(d)
-}
-
-// ── Text ──────────────────────────────────────────────────
-export function truncate(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 3) + '…'
+/** Time left until `iso`, e.g. "2h 15m"; "Expired" once passed. */
+export function timeLeft(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const ms = new Date(iso).getTime() - Date.now()
+  if (ms <= 0) return 'Expired'
+  const m = Math.floor(ms / 60_000)
+  const d = Math.floor(m / 1440)
+  if (d > 0) return `${d}d ${Math.floor((m % 1440) / 60)}h`
+  const h = Math.floor(m / 60)
+  if (h > 0) return `${h}h ${m % 60}m`
+  return `${m}m`
 }
 
 export function initials(name: string): string {
-  const parts = name.trim().split(' ')
-  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
-  return name.slice(0, 2).toUpperCase()
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase())
+    .join('') || 'U'
+}
+
+/** ISO country code → flag emoji (works for any region, no hardcoded list). */
+export function flagEmoji(country: string | null | undefined): string {
+  if (!country || country.length !== 2) return ''
+  return String.fromCodePoint(...country.toUpperCase().split('').map((c) => 127397 + c.charCodeAt(0)))
+}
+
+export function enumLabel(v: string): string {
+  return v.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase())
+}
+
+/** Local `datetime-local` value → ISO string for the API. */
+export function localToIso(local: string): string {
+  return new Date(local).toISOString()
+}
+export function isoToLocalInput(iso: string): string {
+  const d = new Date(iso)
+  const off = d.getTimezoneOffset() * 60_000
+  return new Date(d.getTime() - off).toISOString().slice(0, 16)
 }
